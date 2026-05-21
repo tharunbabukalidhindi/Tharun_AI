@@ -231,14 +231,17 @@ async def conversation_ws(websocket: WebSocket):
     # Engine instances (per connection)
     gemini: Optional[object] = None
     cartesia: Optional[object] = None
+    session_modalities: list = ["AUDIO"]  # default; updated on start_conversation
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     async def on_ai_text(text: str):
         """Gemini produced a text response."""
         await websocket.send_text(json.dumps({"type": "ai_text", "text": text}))
-        # Send to Cartesia TTS if available
-        if cartesia and text.strip():
+        # Only use Cartesia TTS in TEXT modality mode.
+        # In AUDIO mode Gemini produces its own native voice — sending Cartesia
+        # MP3 on top would cause two audio streams to play simultaneously.
+        if cartesia and text.strip() and "AUDIO" not in session_modalities:
             try:
                 audio_b64 = await cartesia.synthesize(text)
                 await websocket.send_text(json.dumps({
@@ -312,12 +315,13 @@ async def conversation_ws(websocket: WebSocket):
                 if gemini:
                     await set_status("gemini", "connecting")
                     try:
-                        modalities = msg.get("modalities", ["AUDIO"])
+                        nonlocal session_modalities
+                        session_modalities = msg.get("modalities", ["AUDIO"])
                         await gemini.connect(
                             on_text=on_ai_text,
                             on_audio=on_ai_audio,
                             on_transcript=on_transcript,
-                            modalities=modalities,
+                            modalities=session_modalities,
                         )
                         await set_status("gemini", "online")
                         if cartesia:
