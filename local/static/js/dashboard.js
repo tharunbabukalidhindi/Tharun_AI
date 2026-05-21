@@ -587,15 +587,13 @@ function handleMessage(msg) {
 
     case 'ai_text':
       addMessage('ai', msg.text);
-      if (state.speechMode === 'web_speech') {
-        accumulateSpeech(msg.text);
-      }
+      // In web_speech mode, Cartesia TTS sends the audio via ai_audio.
+      // Browser speechSynthesis is NOT used for output — Cartesia handles it.
       break;
 
     case 'ai_audio':
-      if (state.speechMode !== 'web_speech') {
-        playAudio(msg.audio, msg.format, msg.sampleRate);
-      }
+      // Play Cartesia MP3 in web_speech mode OR Gemini PCM in gemini_live mode
+      playAudio(msg.audio, msg.format, msg.sampleRate);
       break;
 
     case 'error':
