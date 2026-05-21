@@ -23,15 +23,28 @@ class MuseTalkEngine:
             logger.warning("⚠️ MuseTalk weights not found in checkpoints/ folder. Initializing in Simulation Mode.")
 
     def _verify_weights(self) -> bool:
-        required = [
-            "musetalk/musetalk.json",
-            "musetalk/pytorch_model.bin",
-            "whisper/tiny.pt"
+        # HuggingFace snapshot_download puts files in a subdirectory matching the repo structure.
+        # TMElyralab/MuseTalk downloads to checkpoints/musetalk/musetalk/
+        # openai/whisper-tiny downloads to checkpoints/whisper/ with pytorch_model.bin
+        candidate_sets = [
+            # Original expected paths (flat layout)
+            [
+                "musetalk/musetalk.json",
+                "musetalk/pytorch_model.bin",
+                "whisper/tiny.pt",
+            ],
+            # HuggingFace snapshot layout (nested)
+            [
+                "musetalk/musetalk/musetalk.json",
+                "musetalk/musetalk/pytorch_model.bin",
+                "whisper/pytorch_model.bin",
+            ],
         ]
-        for path in required:
-            if not os.path.exists(os.path.join(self.checkpoints_dir, path)):
-                return False
-        return True
+        for candidate in candidate_sets:
+            if all(os.path.exists(os.path.join(self.checkpoints_dir, p)) for p in candidate):
+                logger.info(f"✓ Weights found at: {candidate[0]}")
+                return True
+        return False
 
     def process_audio(self, audio_bytes: bytes, reference_image: Image.Image) -> list[np.ndarray]:
         """
