@@ -18,6 +18,8 @@ const state = {
   config: {},
   activeTab: 'incident-change',
   tpsInterval: null,
+  outAudioCtx: null,
+  nextStartTime: 0,
 };
 
 // ── DOM Helpers ──────────────────────────────────────────────────────────────
@@ -634,6 +636,16 @@ function onConversationStopped() {
   dom.btnStopSession.disabled  = true;
   if (state.micActive) stopMic();
   dom.micLabel.textContent = 'Disconnected';
+  
+  // Clean up persistent output audio context
+  if (state.outAudioCtx) {
+    try {
+      state.outAudioCtx.close();
+    } catch (e) {}
+    state.outAudioCtx = null;
+  }
+  state.nextStartTime = 0;
+  setSpeaking(false);
 }
 
 dom.btnStartSession.addEventListener('click', () => {
@@ -762,17 +774,33 @@ async function playAudio(audioB64, format, sampleRate) {
     setSpeaking(true);
 
     const rate = sampleRate || 24000;
-    const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: rate });
     
+    // Lazy-initialize single persistent output context
+    if (!state.outAudioCtx || state.outAudioCtx.state === 'closed') {
+      state.outAudioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: rate });
+      state.nextStartTime = state.outAudioCtx.currentTime;
+    }
+    const ctx = state.outAudioCtx;
+
+    // Resume suspended context (safari/chrome security policy)
+    if (ctx.state === 'suspended') {
+      await ctx.resume();
+    }
+
     if (format === 'mp3') {
       const decoded = await ctx.decodeAudioData(buffer.slice(0));
       const source = ctx.createBufferSource();
       source.buffer = decoded;
       source.connect(ctx.destination);
-      source.start();
+      
+      const startTime = Math.max(ctx.currentTime, state.nextStartTime);
+      source.start(startTime);
+      state.nextStartTime = startTime + decoded.duration;
+      
       source.onended = () => {
-        setSpeaking(false);
-        ctx.close();
+        if (ctx.currentTime >= state.nextStartTime - 0.05) {
+          setSpeaking(false);
+        }
       };
     } else {
       const int16 = new Int16Array(buffer);
@@ -784,10 +812,15 @@ async function playAudio(audioB64, format, sampleRate) {
       const source = ctx.createBufferSource();
       source.buffer = audioBuffer;
       source.connect(ctx.destination);
-      source.start();
+      
+      const startTime = Math.max(ctx.currentTime, state.nextStartTime);
+      source.start(startTime);
+      state.nextStartTime = startTime + audioBuffer.duration;
+      
       source.onended = () => {
-        setSpeaking(false);
-        ctx.close();
+        if (ctx.currentTime >= state.nextStartTime - 0.05) {
+          setSpeaking(false);
+        }
       };
     }
   } catch (e) {
