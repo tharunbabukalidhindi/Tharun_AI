@@ -840,10 +840,7 @@ async function playAudio(audioB64, format, sampleRate) {
       source.buffer = audioBuffer;
       source.connect(ctx.destination);
       
-      // Add a 150ms ahead-of-time buffer so small network jitter doesn't
-      // cause audible gaps between consecutive PCM chunks.
-      const SCHEDULE_AHEAD = 0.15;
-      const startTime = Math.max(ctx.currentTime + SCHEDULE_AHEAD, state.nextStartTime);
+      const startTime = Math.max(ctx.currentTime, state.nextStartTime);
       source.start(startTime);
       state.nextStartTime = startTime + audioBuffer.duration;
       
@@ -956,21 +953,69 @@ function stopWebSpeechRecognition() {
   }
 }
 
-// ── Buffered speech accumulator (prevents cancel-on-each-chunk breaking) ──────
+// ── Speech Queue (fixes Chrome 15s break + first-word-twice bugs) ────────────
 let _speechBuffer = '';
-let _speechTimer = null;
+let _speechTimer  = null;
+let _speechQueue  = [];      // sentences waiting to be spoken
+let _speechBusy   = false;   // true while an utterance is playing
 
+// Accumulate streaming chunks; fire speakQueue 400ms after last chunk
 function accumulateSpeech(chunk) {
   _speechBuffer += chunk;
-  // Clear any pending timer — restart the debounce window
   if (_speechTimer) clearTimeout(_speechTimer);
-  // Speak 400ms after the last chunk arrives (full response assembled)
   _speechTimer = setTimeout(() => {
     const fullText = _speechBuffer.trim();
     _speechBuffer = '';
-    _speechTimer = null;
-    if (fullText) speakWebSpeech(fullText);
+    _speechTimer  = null;
+    if (fullText) queueSpeech(fullText);
   }, 400);
+}
+
+// Split text into sentences and push them onto the queue
+function queueSpeech(text) {
+  // Cancel any in-flight speech from the previous response
+  if (window.speechSynthesis) window.speechSynthesis.cancel();
+  _speechQueue = [];
+  _speechBusy  = false;
+
+  // Split on sentence boundaries; keep the delimiter attached
+  const sentences = text
+    .replace(/([.!?])\s+/g, '$1|')
+    .split('|')
+    .map(s => s.replace(/\*\*?/g, '').replace(/\[.*?\]/g, '').trim())
+    .filter(Boolean);
+
+  _speechQueue = sentences;
+  // Small delay after cancel() — fixes Chrome 'first word repeated' bug
+  setTimeout(speakNext, 50);
+}
+
+function speakNext() {
+  if (!window.speechSynthesis || _speechQueue.length === 0) {
+    _speechBusy = false;
+    setSpeaking(false);
+    return;
+  }
+  _speechBusy = true;
+  const sentence = _speechQueue.shift();
+
+  const utterance = new SpeechSynthesisUtterance(sentence);
+  const voices = window.speechSynthesis.getVoices();
+  const voice  = voices.find(v => v.lang.startsWith('en') && v.name.includes('Google'))
+              || voices.find(v => v.lang.startsWith('en'))
+              || voices[0];
+  if (voice) utterance.voice = voice;
+  utterance.rate  = 1.0;
+  utterance.pitch = 1.0;
+
+  utterance.onstart = () => setSpeaking(true);
+  utterance.onend   = () => speakNext();   // chain next sentence
+  utterance.onerror = (e) => {
+    console.warn('TTS error:', e.error);
+    speakNext();                            // skip errored sentence, continue
+  };
+
+  window.speechSynthesis.speak(utterance);
 }
 
 function speakWebSpeech(text) {
