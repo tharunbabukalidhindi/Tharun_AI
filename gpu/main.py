@@ -25,8 +25,8 @@ emage = EMAGEEngine()
 # Active publisher stream
 publisher: Optional[LiveKitPublisher] = None
 
-@app.get("/health")
-async def health():
+@app.get("/status")
+async def status():
     """Returns GPU server hardware telemetry for the dashboard."""
     # Simulate high-fidelity system telemetry stats
     return JSONResponse({
