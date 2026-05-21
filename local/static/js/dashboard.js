@@ -20,6 +20,7 @@ const state = {
   tpsInterval: null,
   outAudioCtx: null,
   nextStartTime: 0,
+  speechMode: 'gemini_live',
 };
 
 // ── DOM Helpers ──────────────────────────────────────────────────────────────
@@ -65,6 +66,7 @@ const dom = {
   personaModal:      $('personaModal'),
   btnSwitchPersona:  $('btnSwitchPersona'),
   closePersonaModal: $('closePersonaModal'),
+  speechModeSelect:  $('speechModeSelect'),
 };
 
 // Module Details mapping
@@ -585,10 +587,15 @@ function handleMessage(msg) {
 
     case 'ai_text':
       addMessage('ai', msg.text);
+      if (state.speechMode === 'web_speech') {
+        speakWebSpeech(msg.text);
+      }
       break;
 
     case 'ai_audio':
-      playAudio(msg.audio, msg.format, msg.sampleRate);
+      if (state.speechMode !== 'web_speech') {
+        playAudio(msg.audio, msg.format, msg.sampleRate);
+      }
       break;
 
     case 'error':
@@ -634,7 +641,14 @@ function onConversationStopped() {
   state.sessionActive = false;
   dom.btnStartSession.disabled = false;
   dom.btnStopSession.disabled  = true;
-  if (state.micActive) stopMic();
+  dom.speechModeSelect.disabled = false;
+  if (state.micActive) {
+    if (state.speechMode === 'web_speech') {
+      stopWebSpeechRecognition();
+    } else {
+      stopMic();
+    }
+  }
   dom.micLabel.textContent = 'Disconnected';
   
   // Clean up persistent output audio context
@@ -645,12 +659,17 @@ function onConversationStopped() {
     state.outAudioCtx = null;
   }
   state.nextStartTime = 0;
+  if (window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+  }
   setSpeaking(false);
 }
 
 dom.btnStartSession.addEventListener('click', () => {
-  send({ type: 'start_conversation' });
+  const modalities = state.speechMode === 'web_speech' ? ['TEXT'] : ['AUDIO'];
+  send({ type: 'start_conversation', modalities });
   dom.micLabel.textContent = 'Connecting...';
+  dom.speechModeSelect.disabled = true;
 });
 
 dom.btnStopSession.addEventListener('click', () => {
@@ -661,9 +680,17 @@ dom.btnStopSession.addEventListener('click', () => {
 dom.micBtn.addEventListener('click', () => {
   if (!state.sessionActive) return;
   if (state.micActive) {
-    stopMic();
+    if (state.speechMode === 'web_speech') {
+      stopWebSpeechRecognition();
+    } else {
+      stopMic();
+    }
   } else {
-    startMic();
+    if (state.speechMode === 'web_speech') {
+      startWebSpeechRecognition();
+    } else {
+      startMic();
+    }
   }
 });
 
@@ -840,6 +867,121 @@ function setSpeaking(active) {
   }
 }
 
+// ── Web Speech API Helpers (Local STT & TTS) ──────────────────────────────────
+let recognition = null;
+
+function initSpeechRecognition() {
+  if (recognition) return;
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    console.warn("Speech recognition not supported in this browser.");
+    return;
+  }
+  recognition = new SpeechRecognition();
+  recognition.continuous = false;
+  recognition.interimResults = true;
+  recognition.lang = 'en-US';
+
+  recognition.onstart = () => {
+    state.micActive = true;
+    dom.micBtn.classList.add('active');
+    dom.micLabel.textContent = 'Listening locally...';
+    dom.transcriptArea.style.display = 'block';
+  };
+
+  recognition.onresult = (event) => {
+    let interimTranscript = '';
+    let finalTranscript = '';
+
+    for (let i = event.resultIndex; i < event.results.length; ++i) {
+      if (event.results[i].isFinal) {
+        finalTranscript += event.results[i][0].transcript;
+      } else {
+        interimTranscript += event.results[i][0].transcript;
+      }
+    }
+
+    const displayText = finalTranscript || interimTranscript;
+    dom.liveTranscript.textContent = displayText;
+
+    if (finalTranscript.trim()) {
+      dom.textInput.value = finalTranscript;
+    }
+  };
+
+  recognition.onerror = (event) => {
+    console.error("Speech recognition error:", event.error);
+    stopWebSpeechRecognition();
+  };
+
+  recognition.onend = () => {
+    if (state.micActive) {
+      const text = dom.textInput.value.trim();
+      if (text) {
+        sendText();
+      }
+      stopWebSpeechRecognition();
+    }
+  };
+}
+
+function startWebSpeechRecognition() {
+  initSpeechRecognition();
+  if (!recognition) {
+    alert("Speech recognition is not supported in this browser. Please use Chrome/Safari.");
+    return;
+  }
+  if (window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+  }
+  try {
+    recognition.start();
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+function stopWebSpeechRecognition() {
+  state.micActive = false;
+  dom.micBtn.classList.remove('active');
+  dom.micLabel.textContent = 'Click to speak';
+  dom.transcriptArea.style.display = 'none';
+  if (recognition) {
+    try {
+      recognition.stop();
+    } catch (e) {}
+  }
+}
+
+function speakWebSpeech(text) {
+  if (!window.speechSynthesis) return;
+  window.speechSynthesis.cancel();
+
+  const cleanText = text.replace(/\*\*?/g, '').replace(/\[.*?\]/g, '').trim();
+  if (!cleanText) return;
+
+  const utterance = new SpeechSynthesisUtterance(cleanText);
+  const voices = window.speechSynthesis.getVoices();
+  const voice = voices.find(v => v.lang.startsWith('en') && v.name.includes('Google')) || 
+                voices.find(v => v.lang.startsWith('en')) || 
+                voices[0];
+  if (voice) {
+    utterance.voice = voice;
+  }
+
+  utterance.onstart = () => {
+    setSpeaking(true);
+  };
+  utterance.onend = () => {
+    setSpeaking(false);
+  };
+  utterance.onerror = () => {
+    setSpeaking(false);
+  };
+
+  window.speechSynthesis.speak(utterance);
+}
+
 // ── Text Messaging ───────────────────────────────────────────────────────────
 dom.sendBtn.addEventListener('click', sendText);
 dom.textInput.addEventListener('keydown', (e) => {
@@ -884,4 +1026,13 @@ document.addEventListener('DOMContentLoaded', () => {
   connectWS();
   dom.micBtn.disabled = true;
   startTelemetryLogs(); // Start console feed for default tab (Incident & Change)
+  
+  // Sync speech mode from dropdown
+  if (dom.speechModeSelect) {
+    state.speechMode = dom.speechModeSelect.value;
+    dom.speechModeSelect.addEventListener('change', (e) => {
+      state.speechMode = e.target.value;
+      console.log('Speech engine set to:', state.speechMode);
+    });
+  }
 });

@@ -310,10 +310,12 @@ async def conversation_ws(websocket: WebSocket):
                 if gemini:
                     await set_status("gemini", "connecting")
                     try:
+                        modalities = msg.get("modalities", ["AUDIO"])
                         await gemini.connect(
                             on_text=on_ai_text,
                             on_audio=on_ai_audio,
                             on_transcript=on_transcript,
+                            modalities=modalities,
                         )
                         await set_status("gemini", "online")
                         if cartesia:

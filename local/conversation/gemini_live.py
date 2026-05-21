@@ -37,6 +37,7 @@ class GeminiLiveClient:
         on_text: Callable,
         on_audio: Callable,
         on_transcript: Callable,
+        modalities: list[str] = ["AUDIO"]
     ):
         """Connect to Gemini Live and start background receive loop."""
         from google import genai
@@ -49,7 +50,7 @@ class GeminiLiveClient:
         self._client = genai.Client(api_key=self.api_key)
 
         config = types.LiveConnectConfig(
-            response_modalities=["AUDIO"],
+            response_modalities=modalities,
             system_instruction=SYSTEM_PROMPT,
             speech_config=types.SpeechConfig(
                 voice_config=types.VoiceConfig(
