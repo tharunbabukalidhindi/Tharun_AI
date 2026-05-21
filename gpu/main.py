@@ -6,6 +6,7 @@ from typing import Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 import uvicorn
+import numpy as np
 from PIL import Image
 
 # Setup logging
