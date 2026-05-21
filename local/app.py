@@ -27,7 +27,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 # ── Load env ──────────────────────────────────────────────────────────────────
-load_dotenv(override=True)
+BASE_DIR = Path(__file__).parent
+load_dotenv(BASE_DIR / ".env", override=True)
 
 # ── Config ────────────────────────────────────────────────────────────────────
 GEMINI_API_KEY      = os.getenv("GEMINI_API_KEY", "")
@@ -44,7 +45,6 @@ AGENT_NAME          = os.getenv("AGENT_NAME", "Mr. Brain")
 PERSONA_IMAGE_PATH  = os.getenv("PERSONA_IMAGE_PATH", "../persona/persona.jpg")
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-BASE_DIR      = Path(__file__).parent
 STATIC_DIR    = BASE_DIR / "static"
 TEMPLATES_DIR = BASE_DIR / "templates"
 
