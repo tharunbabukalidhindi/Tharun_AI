@@ -16,7 +16,7 @@ You are represented as an animated avatar — speak naturally and conversational
 Keep responses concise (1-3 sentences) unless the user asks for detailed explanations.
 Be helpful, engaging, and human-like in your responses."""
 
-GEMINI_LIVE_MODEL = "gemini-2.0-flash-live-001"
+GEMINI_LIVE_MODEL = "gemini-2.5-flash-native-audio-latest"
 
 
 class GeminiLiveClient:
