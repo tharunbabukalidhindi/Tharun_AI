@@ -588,7 +588,7 @@ function handleMessage(msg) {
     case 'ai_text':
       addMessage('ai', msg.text);
       if (state.speechMode === 'web_speech') {
-        speakWebSpeech(msg.text);
+        accumulateSpeech(msg.text);
       }
       break;
 
@@ -840,7 +840,10 @@ async function playAudio(audioB64, format, sampleRate) {
       source.buffer = audioBuffer;
       source.connect(ctx.destination);
       
-      const startTime = Math.max(ctx.currentTime, state.nextStartTime);
+      // Add a 150ms ahead-of-time buffer so small network jitter doesn't
+      // cause audible gaps between consecutive PCM chunks.
+      const SCHEDULE_AHEAD = 0.15;
+      const startTime = Math.max(ctx.currentTime + SCHEDULE_AHEAD, state.nextStartTime);
       source.start(startTime);
       state.nextStartTime = startTime + audioBuffer.duration;
       
@@ -951,6 +954,23 @@ function stopWebSpeechRecognition() {
       recognition.stop();
     } catch (e) {}
   }
+}
+
+// ── Buffered speech accumulator (prevents cancel-on-each-chunk breaking) ──────
+let _speechBuffer = '';
+let _speechTimer = null;
+
+function accumulateSpeech(chunk) {
+  _speechBuffer += chunk;
+  // Clear any pending timer — restart the debounce window
+  if (_speechTimer) clearTimeout(_speechTimer);
+  // Speak 400ms after the last chunk arrives (full response assembled)
+  _speechTimer = setTimeout(() => {
+    const fullText = _speechBuffer.trim();
+    _speechBuffer = '';
+    _speechTimer = null;
+    if (fullText) speakWebSpeech(fullText);
+  }, 400);
 }
 
 function speakWebSpeech(text) {
