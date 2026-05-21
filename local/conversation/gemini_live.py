@@ -87,10 +87,6 @@ class GeminiLiveClient:
     async def _handle_response(self, response):
         """Parse and dispatch a response chunk from Gemini."""
         try:
-            # Top-level text
-            if hasattr(response, "text") and response.text:
-                await self._on_text(response.text)
-
             # Top-level audio bytes
             if hasattr(response, "data") and response.data:
                 await self._on_audio(response.data)
@@ -102,10 +98,18 @@ class GeminiLiveClient:
                 # Model turn parts (text + audio)
                 if hasattr(sc, "model_turn") and sc.model_turn:
                     for part in sc.model_turn.parts:
+                        # Skip internal thought/thinking process parts
+                        if getattr(part, "thought", False):
+                            continue
                         if hasattr(part, "text") and part.text:
                             await self._on_text(part.text)
                         if hasattr(part, "inline_data") and part.inline_data:
                             await self._on_audio(part.inline_data.data)
+
+            # Fallback to top-level text only if there is no structured server content
+            else:
+                if hasattr(response, "text") and response.text:
+                    await self._on_text(response.text)
 
                 # Input transcription (what the user said)
                 if hasattr(sc, "input_transcription") and sc.input_transcription:
