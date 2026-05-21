@@ -27,7 +27,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 # ── Load env ──────────────────────────────────────────────────────────────────
-load_dotenv()
+load_dotenv(override=True)
 
 # ── Config ────────────────────────────────────────────────────────────────────
 GEMINI_API_KEY      = os.getenv("GEMINI_API_KEY", "")
