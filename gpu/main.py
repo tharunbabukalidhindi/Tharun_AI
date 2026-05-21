@@ -54,8 +54,8 @@ async def audio_stream_endpoint(websocket: WebSocket):
     await websocket.accept()
     logger.info("🔌 Local orchestrator connected to GPU stream")
 
-    # Load avatar reference image
-    ref_image_path = "../persona/persona.jpg"
+    # Load avatar reference image — CWD is ~/Tharun_AI when server starts
+    ref_image_path = "persona/persona.jpg"
     if os.path.exists(ref_image_path):
         avatar_img = Image.open(ref_image_path).convert("RGB")
     else:
