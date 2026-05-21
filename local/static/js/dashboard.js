@@ -596,12 +596,31 @@ function handleMessage(msg) {
       playAudio(msg.audio, msg.format, msg.sampleRate);
       break;
 
-    case 'video_frame':
-      // Live JPEG frame from GPU — update avatar image directly
-      if (msg.data) {
-        const avatarImg = document.getElementById('avatarImage');
-        if (avatarImg) {
-          avatarImg.src = 'data:image/jpeg;base64,' + msg.data;
+    case 'video_ready':
+      // GPU generated perfectly synced MP4 -> play it
+      if (msg.video) {
+        const videoEl = document.getElementById('avatarVideo');
+        const imgEl = document.getElementById('avatarImage');
+        const canvasEl = document.getElementById('avatarCanvas');
+        if (videoEl && imgEl) {
+          // Hide idle image and canvas
+          imgEl.style.display = 'none';
+          if (canvasEl) canvasEl.style.display = 'none';
+          
+          // Show video and play
+          videoEl.style.display = 'block';
+          videoEl.src = 'data:video/mp4;base64,' + msg.video;
+          
+          setSpeaking(true);
+          videoEl.onended = () => {
+            // Restore idle avatar after video finishes
+            videoEl.style.display = 'none';
+            imgEl.style.display = 'block';
+            if (canvasEl) canvasEl.style.display = 'block';
+            setSpeaking(false);
+          };
+          
+          videoEl.play().catch(e => console.error("Autoplay failed", e));
         }
       }
       break;
@@ -888,11 +907,112 @@ function setSpeaking(active) {
   if (active) {
     dom.avatarScreen.classList.add('speaking');
     dom.speakingWave.classList.add('active');
+    avatarAnim.targetAmplitude = 0;
   } else {
     dom.avatarScreen.classList.remove('speaking');
     dom.speakingWave.classList.remove('active');
+    avatarAnim.targetAmplitude = 0;
   }
 }
+
+// ── Avatar Animation Engine ────────────────────────────────────────────────────
+// Drives real-time mouth + idle animation on the canvas overlay
+const avatarAnim = (() => {
+  let canvas, ctx, imgEl, rafId;
+  let amplitude     = 0;   // smoothed current amplitude (0-1)
+  let targetAmplitude = 0; // target from audio data
+  let breathPhase   = 0;   // idle breathing oscillation
+
+  function init() {
+    canvas = document.getElementById('avatarCanvas');
+    imgEl  = document.getElementById('avatarImage');
+    if (!canvas) return;
+    ctx = canvas.getContext('2d');
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+    loop();
+  }
+
+  function resizeCanvas() {
+    if (!canvas) return;
+    const rect = canvas.parentElement.getBoundingClientRect();
+    canvas.width  = rect.width  || 400;
+    canvas.height = rect.height || 400;
+  }
+
+  function loop() {
+    rafId = requestAnimationFrame(loop);
+    if (!ctx || !canvas) return;
+
+    // Smooth amplitude toward target
+    amplitude += (targetAmplitude - amplitude) * 0.25;
+    breathPhase += 0.012;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const W = canvas.width, H = canvas.height;
+
+    // ── Mouth animation ────────────────────────────────────────────────────
+    // Position: lower 1/3 center of avatar (tuned for front-facing face)
+    const mouthX   = W * 0.50;
+    const mouthY   = H * 0.70;
+    const mouthW   = W * 0.18;
+    const mouthH   = Math.max(2, amplitude * H * 0.12);
+    const mouthOpen = amplitude > 0.02;
+
+    ctx.save();
+    // Outer glow when speaking
+    if (amplitude > 0.05) {
+      ctx.shadowColor  = `rgba(0, 200, 255, ${amplitude * 0.7})`;
+      ctx.shadowBlur   = 20 * amplitude;
+    }
+
+    // Lips ellipse
+    ctx.beginPath();
+    ctx.ellipse(mouthX, mouthY, mouthW / 2, Math.max(3, mouthH / 2), 0, 0, Math.PI * 2);
+    ctx.fillStyle = mouthOpen
+      ? `rgba(10, 5, 5, ${0.7 + amplitude * 0.3})`
+      : 'rgba(80, 30, 30, 0.6)';
+    ctx.fill();
+
+    // Lip border
+    ctx.strokeStyle = `rgba(200, 80, 80, ${0.5 + amplitude * 0.5})`;
+    ctx.lineWidth   = 1.5;
+    ctx.stroke();
+    ctx.restore();
+
+    // ── Idle glow pulse (breathing effect) ────────────────────────────────
+    if (amplitude < 0.05) {
+      const breathIntensity = (Math.sin(breathPhase) + 1) / 2 * 0.15;
+      ctx.save();
+      ctx.beginPath();
+      ctx.ellipse(mouthX, mouthY, mouthW / 2 + 2, 4, 0, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(100, 180, 255, ${breathIntensity})`;
+      ctx.lineWidth   = 2;
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  function feedAmplitude(int16Array) {
+    // Calculate RMS amplitude from PCM samples
+    let sum = 0;
+    for (let i = 0; i < int16Array.length; i++) {
+      sum += (int16Array[i] / 32768.0) ** 2;
+    }
+    const rms = Math.sqrt(sum / int16Array.length);
+    targetAmplitude = Math.min(1, rms * 4); // scale up for visibility
+  }
+
+  // Auto-init when DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    setTimeout(init, 100);
+  }
+
+  return { init, feedAmplitude, get targetAmplitude() { return targetAmplitude; }, set targetAmplitude(v) { targetAmplitude = v; } };
+})();
 
 // ── Web Speech API Helpers (Local STT & TTS) ──────────────────────────────────
 let recognition = null;

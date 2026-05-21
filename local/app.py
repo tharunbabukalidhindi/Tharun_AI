@@ -33,9 +33,6 @@ load_dotenv(BASE_DIR / ".env", override=True)
 GEMINI_API_KEY      = os.getenv("GEMINI_API_KEY", "")
 CARTESIA_API_KEY    = os.getenv("CARTESIA_API_KEY", "")
 CARTESIA_VOICE_ID   = os.getenv("CARTESIA_VOICE_ID", "a0e99841-438c-4a64-b679-ae501e7d6091")
-LIVEKIT_URL         = os.getenv("LIVEKIT_URL", "")
-LIVEKIT_API_KEY     = os.getenv("LIVEKIT_API_KEY", "")
-LIVEKIT_API_SECRET  = os.getenv("LIVEKIT_API_SECRET", "")
 GPU_WS_URL          = os.getenv("GPU_WS_URL", "")
 GPU_API_URL         = os.getenv("GPU_API_URL", "")
 APP_HOST            = os.getenv("APP_HOST", "0.0.0.0")
@@ -64,15 +61,11 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 # ── Service Status ────────────────────────────────────────────────────────────
-service_status = {
     "dashboard":      {"status": "online",  "label": "Dashboard",      "side": "local"},
-    "gemini":         {"status": "offline", "label": "Gemini Live",    "side": "local"},
+    "gemini":         {"status": "offline", "label": "Gemini API",     "side": "local"},
     "cartesia":       {"status": "offline", "label": "Cartesia TTS",   "side": "local"},
-    "livekit_client": {"status": "offline", "label": "LiveKit Client", "side": "local"},
-    "gpu_server":     {"status": "offline", "label": "GPU FastAPI",    "side": "gpu"},
+    "gpu_server":     {"status": "offline", "label": "GPU Server",     "side": "gpu"},
     "musetalk":       {"status": "offline", "label": "MuseTalk",       "side": "gpu"},
-    "emage":          {"status": "offline", "label": "EMAGE",          "side": "gpu"},
-    "livekit_server": {"status": "offline", "label": "LiveKit Server", "side": "gpu"},
 }
 
 # ── Connected Browser Clients ─────────────────────────────────────────────────
@@ -109,18 +102,12 @@ async def check_gpu_health_loop():
                     if response.status_code == 200:
                         await set_status("gpu_server", "online")
                         await set_status("musetalk", "online")
-                        await set_status("emage", "online")
-                        await set_status("livekit_server", "online")
                     else:
                         await set_status("gpu_server", "offline")
                         await set_status("musetalk", "offline")
-                        await set_status("emage", "offline")
-                        await set_status("livekit_server", "offline")
             except Exception:
                 await set_status("gpu_server", "offline")
                 await set_status("musetalk", "offline")
-                await set_status("emage", "offline")
-                await set_status("livekit_server", "offline")
         await asyncio.sleep(5.0)
 
 
@@ -133,8 +120,7 @@ async def dashboard(request: Request):
         "agent_name":    AGENT_NAME,
         "has_gemini":    bool(GEMINI_API_KEY),
         "has_cartesia":  bool(CARTESIA_API_KEY),
-        "has_livekit":   bool(LIVEKIT_URL),
-        "has_gpu":       bool(GPU_WS_URL),
+        "has_gpu":       bool(GPU_API_URL),
     })
 
 
@@ -149,9 +135,7 @@ async def get_config():
         "agent_name":  AGENT_NAME,
         "has_gemini":  bool(GEMINI_API_KEY),
         "has_cartesia": bool(CARTESIA_API_KEY),
-        "has_livekit": bool(LIVEKIT_URL),
-        "has_gpu":     bool(GPU_WS_URL),
-        "livekit_url": LIVEKIT_URL or None,
+        "has_gpu":     bool(GPU_API_URL),
     })
 
 
@@ -185,19 +169,6 @@ async def get_persona():
 </svg>"""
     return Response(content=svg, media_type="image/svg+xml")
 
-
-@app.get("/api/livekit-token")
-async def get_livekit_token():
-    """Generate a viewer token for the browser to join the LiveKit room."""
-    if not (LIVEKIT_URL and LIVEKIT_API_KEY and LIVEKIT_API_SECRET):
-        return JSONResponse({"error": "LiveKit not configured"}, status_code=503)
-    try:
-        from streaming.livekit_client import LiveKitTokens
-        lk = LiveKitTokens(LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
-        token = lk.generate_viewer_token()
-        return JSONResponse({"token": token, "url": LIVEKIT_URL})
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @app.get("/health")
@@ -243,93 +214,24 @@ async def conversation_ws(websocket: WebSocket):
     connected_clients.append(websocket)
     logger.info("🔌 Browser client connected")
 
-    # Send current state immediately
-    await websocket.send_text(json.dumps({
-        "type": "status", "services": service_status
-    }))
-    await websocket.send_text(json.dumps({
-        "type": "config",
-        "data": {
-            "agent_name":  AGENT_NAME,
-            "has_gemini":  bool(GEMINI_API_KEY),
-            "has_cartesia": bool(CARTESIA_API_KEY),
-            "has_gpu":     bool(GPU_WS_URL),
-        }
-    }))
-
     # Engine instances (per connection)
-    gemini: Optional[object] = None
-    cartesia: Optional[object] = None
-    session_modalities = ["AUDIO"]  # default; updated on start_conversation
-
-    # ── Helpers ───────────────────────────────────────────────────────────────
-
-    async def on_ai_text(text: str):
-        """Gemini produced a text response."""
-        await websocket.send_text(json.dumps({"type": "ai_text", "text": text}))
-        # Only use Cartesia TTS in TEXT modality mode.
-        # In AUDIO mode Gemini produces its own native voice — sending Cartesia
-        # MP3 on top would cause two audio streams to play simultaneously.
-        if cartesia and text.strip() and "AUDIO" not in session_modalities:
-            try:
-                audio_b64 = await cartesia.synthesize(text)
-                await websocket.send_text(json.dumps({
-                    "type": "ai_audio",
-                    "audio": audio_b64,
-                    "format": "mp3",
-                }))
-            except Exception as e:
-                logger.error(f"TTS error: {e}")
-
-    # Audio batch buffer — accumulate chunks before sending to GPU
-    _audio_batch: list[bytes] = []
-    _batch_duration_ms: int = 0
-    _BATCH_TARGET_MS: int = 600   # send to GPU every 600ms of audio
-
-    async def on_ai_audio(audio_bytes: bytes):
-        """Gemini produced raw PCM audio response."""
-        nonlocal _audio_batch, _batch_duration_ms
-        audio_b64 = base64.b64encode(audio_bytes).decode()
-        await websocket.send_text(json.dumps({
-            "type": "ai_audio",
-            "audio": audio_b64,
-            "format": "pcm",
-            "sampleRate": 24000,
-        }))
-        # Accumulate audio chunks; send to GPU in batches to avoid MuseTalk overload
-        if gpu_http:
-            _audio_batch.append(audio_bytes)
-            # 24000 Hz, 16-bit = 2 bytes/sample → duration_ms = len / (24000*2) * 1000
-            _batch_duration_ms += len(audio_bytes) * 1000 // (24000 * 2)
-            if _batch_duration_ms >= _BATCH_TARGET_MS:
-                batch = b"".join(_audio_batch)
-                _audio_batch = []
-                _batch_duration_ms = 0
-                try:
-                    await gpu_http.post("/audio", content=batch)
-                except Exception as e:
-                    logger.debug(f"GPU audio POST failed: {e}")
-
-    async def on_transcript(text: str, is_final: bool):
-        """Gemini transcribed what the user said."""
-        await websocket.send_text(json.dumps({
-            "type": "transcript",
-            "text": text,
-            "final": is_final,
-        }))
-
-    # ── Message Loop ──────────────────────────────────────────────────────────
+    cartesia = None
+    gpu_http = None
 
     try:
-        from conversation.gemini_live import GeminiLiveClient
         from tts.cartesia_tts import CartesiaTTS
-
+        from google import genai
+        
         if GEMINI_API_KEY:
-            gemini = GeminiLiveClient(api_key=GEMINI_API_KEY, agent_name=AGENT_NAME)
+            gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+        else:
+            gemini_client = None
+
         if CARTESIA_API_KEY:
             cartesia = CartesiaTTS(api_key=CARTESIA_API_KEY, voice_id=CARTESIA_VOICE_ID)
 
-        gpu_http = httpx.AsyncClient(base_url=GPU_API_URL, timeout=5.0) if GPU_API_URL else None
+        if GPU_API_URL:
+            gpu_http = httpx.AsyncClient(base_url=GPU_API_URL, timeout=30.0)
 
         while True:
             raw = await websocket.receive_text()
@@ -338,109 +240,103 @@ async def conversation_ws(websocket: WebSocket):
 
             # ── Start conversation ─────────────────────────────────────────
             if msg_type == "start_conversation":
-                if GPU_API_URL:
-                    logger.info(f"GPU HTTP client ready → {GPU_API_URL}")
-                if gemini:
-                    await set_status("gemini", "connecting")
+                if gemini_client:
+                    await set_status("gemini", "online")
+                if cartesia:
+                    await set_status("cartesia", "online")
+                if gpu_http:
+                    await set_status("gpu_server", "online")
+                
+                await websocket.send_text(json.dumps({"type": "conversation_started"}))
+                logger.info("✓ Conversation started")
+
+            # ── User Text Input (from Web Speech API or typing) ─────────────
+            elif msg_type == "text_message" or msg_type == "user_text":
+                user_text = msg.get("text", "").strip()
+                if not user_text:
+                    continue
+                    
+                if not gemini_client:
+                    demo = f"👋 Demo Mode: You said \"{user_text}\". Add GEMINI_API_KEY for AI responses!"
+                    await websocket.send_text(json.dumps({"type": "ai_text", "text": demo}))
+                    continue
+                
+                logger.info(f"User: {user_text}")
+                
+                # 1. Call Gemini for text response
+                try:
+                    response = gemini_client.models.generate_content(
+                        model='gemini-2.5-flash',
+                        contents=user_text,
+                        config=genai.types.GenerateContentConfig(
+                            system_instruction="You are an intelligent AI assistant with a warm, expressive personality. Keep responses concise (1-3 sentences).",
+                            temperature=0.7,
+                        )
+                    )
+                    ai_text = response.text
+                    logger.info(f"AI: {ai_text}")
+                    await websocket.send_text(json.dumps({"type": "ai_text", "text": ai_text}))
+                except Exception as e:
+                    logger.error(f"Gemini error: {e}")
+                    await set_status("gemini", "error")
+                    await websocket.send_text(json.dumps({"type": "error", "message": f"Gemini API error: {e}"}))
+                    continue
+
+                # 2. Call Cartesia for TTS
+                if cartesia:
                     try:
-                        session_modalities = msg.get("modalities", ["AUDIO"])
-                        await gemini.connect(
-                            on_text=on_ai_text,
-                            on_audio=on_ai_audio,
-                            on_transcript=on_transcript,
-                            modalities=session_modalities,
-                        )
-                        await set_status("gemini", "online")
-                        if cartesia:
-                            await set_status("cartesia", "online")
-                        logger.info("✓ Conversation started")
-                        await websocket.send_text(json.dumps({
-                            "type": "conversation_started"
-                        }))
+                        logger.info("Generating TTS...")
+                        audio_b64 = await cartesia.synthesize(ai_text)
+                        
+                        # 3. Call GPU for rendering perfectly synced MP4
+                        if gpu_http:
+                            logger.info("Requesting GPU render...")
+                            audio_bytes = base64.b64decode(audio_b64)
+                            try:
+                                gpu_resp = await gpu_http.post("/generate_video", content=audio_bytes)
+                                if gpu_resp.status_code == 200:
+                                    video_b64 = gpu_resp.json().get("video")
+                                    if video_b64:
+                                        await websocket.send_text(json.dumps({
+                                            "type": "video_ready",
+                                            "video": video_b64
+                                        }))
+                                        logger.info("✓ GPU Video generated and sent to browser")
+                                else:
+                                    logger.error(f"GPU render failed: {gpu_resp.text}")
+                            except Exception as e:
+                                logger.error(f"GPU connection error: {e}")
+                        else:
+                            # Fallback if GPU is down
+                            await websocket.send_text(json.dumps({
+                                "type": "ai_audio",
+                                "audio": audio_b64,
+                                "format": "mp3",
+                            }))
+                            
                     except Exception as e:
-                        logger.error(f"Gemini connect error: {e}")
-                        await set_status("gemini", "error")
-                        await websocket.send_text(json.dumps({
-                            "type": "error",
-                            "message": f"Failed to connect to Gemini: {e}"
-                        }))
-                else:
-                    await websocket.send_text(json.dumps({
-                        "type": "info",
-                        "message": "🎭 Demo Mode — Add GEMINI_API_KEY to .env for live AI conversation."
-                    }))
-                    await websocket.send_text(json.dumps({"type": "conversation_started"}))
-
-            # ── Audio chunk from mic ───────────────────────────────────────
-            elif msg_type == "audio_chunk":
-                if gemini and getattr(gemini, "is_connected", False):
-                    audio_data = base64.b64decode(msg["data"])
-                    await gemini.send_audio(audio_data)
-
-            # ── Text message ──────────────────────────────────────────────
-            elif msg_type == "text_message":
-                text = msg.get("text", "").strip()
-                if text:
-                    if gemini and getattr(gemini, "is_connected", False):
-                        await gemini.send_text(text)
-                    else:
-                        # Demo mode response
-                        demo = (
-                            f"👋 Demo Mode: You said \"{text}\". "
-                            "Add your GEMINI_API_KEY to .env for real AI responses!"
-                        )
-                        await websocket.send_text(json.dumps({
-                            "type": "ai_text", "text": demo
-                        }))
+                        logger.error(f"TTS error: {e}")
 
             # ── Stop conversation ──────────────────────────────────────────
             elif msg_type == "stop_conversation":
-                if gemini and getattr(gemini, "is_connected", False):
-                    await gemini.disconnect()
-                    await set_status("gemini", "offline")
-                    await set_status("cartesia", "offline")
-                if gpu_ws:
-                    try:
-                        await gpu_ws.close()
-                    except Exception:
-                        pass
-                    gpu_ws = None
-                logger.info("Conversation stopped")
-                await websocket.send_text(json.dumps({"type": "conversation_stopped"}))
-
-            # ── Sync active module context ─────────────────────────────────
-            elif msg_type == "sync_module":
-                module_id = msg.get("module", "")
-                logger.info(f"Operator active module synced: {module_id}")
-                if gemini and getattr(gemini, "is_connected", False):
-                    # Inject module shift system context
-                    context_msg = f"[SYSTEM: Operator switched view to module '{module_id}'. Provide operational intelligence regarding this context if asked.]"
-                    await gemini.send_text(context_msg)
-
-            # ── Ping ──────────────────────────────────────────────────────
+                await set_status("gemini", "offline")
+                await set_status("cartesia", "offline")
+                logger.info("Conversation stopped by user")
+                break
+                
             elif msg_type == "ping":
                 await websocket.send_text(json.dumps({"type": "pong"}))
 
     except WebSocketDisconnect:
-        pass
+        logger.info("Browser client disconnected normally")
     except Exception as e:
-        logger.error(f"WebSocket error: {e}")
+        logger.error(f"Conversation error: {e}", exc_info=True)
     finally:
-        # Cleanup
-        if gpu_ws:
-            try:
-                await gpu_ws.close()
-            except Exception:
-                pass
-            gpu_ws = None
-        if gemini and getattr(gemini, "is_connected", False):
-            try:
-                await gemini.disconnect()
-            except Exception:
-                pass
+        if gpu_http:
+            await gpu_http.aclose()
         if websocket in connected_clients:
             connected_clients.remove(websocket)
-        logger.info("🔌 Browser client disconnected")
+        logger.info("🔌 Cleaned up connection resources")
 
 
 # ── Startup ───────────────────────────────────────────────────────────────────
@@ -452,8 +348,7 @@ async def on_startup():
     logger.info("━" * 55)
     logger.info(f"  Gemini API  : {'✓ configured' if GEMINI_API_KEY else '✗ missing (demo mode)'}")
     logger.info(f"  Cartesia    : {'✓ configured' if CARTESIA_API_KEY else '✗ missing'}")
-    logger.info(f"  LiveKit     : {'✓ configured' if LIVEKIT_URL else '✗ missing'}")
-    logger.info(f"  GPU Server  : {'✓ configured' if GPU_WS_URL else '✗ not set (Phase 2)'}")
+    logger.info(f"  GPU Server  : {'✓ configured' if GPU_WS_URL else '✗ not set'}")
     logger.info("━" * 55)
     logger.info(f"  Open: http://localhost:{APP_PORT}")
     logger.info("━" * 55)

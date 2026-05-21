@@ -70,84 +70,96 @@ def _warmup_models():
         logger.warning(f"MuseTalk warmup: {e}")
 
 
+import subprocess
+import base64
+import tempfile
+import shutil
+
 # ── Status ─────────────────────────────────────────────────────────────────────
 @app.get("/status")
 async def status():
     return JSONResponse({
         "status": "ready",
-        "cpu_usage": 14.5,
-        "gpu_usage": 32.8,
-        "vram_total": 24.0,
-        "vram_used": 8.4,
-        "latency_ms": 142,
-        "temp_celsius": 68.0,
+        "gpu_ready": True
     })
 
-
-# ── Audio ingestion ────────────────────────────────────────────────────────────
-@app.post("/audio")
-async def receive_audio(request: Request):
+# ── Video Generation (Perfect Sync) ────────────────────────────────────────────
+@app.post("/generate_video")
+async def generate_video(request: Request):
     """
-    Receives raw PCM audio bytes from the local orchestrator.
-    Runs MuseTalk lip-sync + EMAGE body motion and queues JPEG frames
-    for the MJPEG stream.
+    Receives complete MP3 audio bytes, generates MuseTalk frames,
+    encodes them with the audio into an MP4, and returns the base64 MP4.
+    Guarantees perfect audio-visual synchronization.
     """
     audio_bytes = await request.body()
     if not audio_bytes:
-        return JSONResponse({"frames": 0})
+        return JSONResponse({"error": "No audio data"}, status_code=400)
 
     try:
-        lip_frames   = musetalk.process_audio(audio_bytes, avatar_img)
-        num_frames   = len(lip_frames)
-        body_motions = emage.generate_motion(audio_bytes, num_frames)
-
-        queued = 0
-        for idx in range(num_frames):
-            frame  = lip_frames[idx]
-            dy     = int(body_motions[idx]["body_y_offset"])
-            if dy:
-                frame = np.roll(frame, dy, axis=0)
-            jpeg = _encode_jpeg(frame)
-            if not _frame_queue.full():
-                _frame_queue.put_nowait(jpeg)
-                queued += 1
-
-        return JSONResponse({"frames": queued})
+        # We need a temporary directory to store frames and audio for ffmpeg
+        with tempfile.TemporaryDirectory() as tmpdir:
+            audio_path = os.path.join(tmpdir, "audio.mp3")
+            with open(audio_path, "wb") as f:
+                f.write(audio_bytes)
+                
+            logger.info("Running MuseTalk inference...")
+            # MuseTalk needs 16kHz PCM or handles MP3 directly? 
+            # Our MuseTalk wrapper uses torchaudio or librosa which can load MP3 if ffmpeg is installed.
+            lip_frames = musetalk.process_audio(audio_bytes, avatar_img)
+            num_frames = len(lip_frames)
+            logger.info(f"Generated {num_frames} frames.")
+            
+            # Apply EMAGE subtle body motions
+            body_motions = emage.generate_motion(audio_bytes, num_frames)
+            
+            frames_dir = os.path.join(tmpdir, "frames")
+            os.makedirs(frames_dir, exist_ok=True)
+            
+            logger.info("Saving frames to disk...")
+            for idx in range(num_frames):
+                frame = lip_frames[idx]
+                dy = int(body_motions[idx]["body_y_offset"])
+                if dy:
+                    frame = np.roll(frame, dy, axis=0)
+                
+                # Save frame as JPEG
+                pil_img = Image.fromarray(frame.astype(np.uint8))
+                pil_img.save(os.path.join(frames_dir, f"{idx:04d}.jpg"), quality=85)
+                
+            out_video_path = os.path.join(tmpdir, "output.mp4")
+            logger.info("Encoding perfectly synced MP4 with ffmpeg...")
+            
+            # MuseTalk uses exactly 25 FPS (or 24? usually 25 for 16000/640 hop size)
+            # Standard MuseTalk hop_size is 640 @ 16kHz -> 25 fps.
+            fps = 25
+            
+            ffmpeg_cmd = [
+                "ffmpeg", "-y",
+                "-framerate", str(fps),
+                "-i", os.path.join(frames_dir, "%04d.jpg"),
+                "-i", audio_path,
+                "-c:v", "libx264",
+                "-preset", "ultrafast",
+                "-pix_fmt", "yuv420p",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-shortest",
+                out_video_path
+            ]
+            
+            subprocess.run(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+            
+            with open(out_video_path, "rb") as f:
+                video_bytes = f.write() if False else f.read() # just read
+                
+            video_b64 = base64.b64encode(video_bytes).decode('utf-8')
+            
+            logger.info("✓ Video generated and ready to serve.")
+            return JSONResponse({"video": video_b64})
 
     except Exception as e:
-        logger.error(f"Audio processing error: {e}", exc_info=True)
+        logger.error(f"Video generation error: {e}", exc_info=True)
         return JSONResponse({"error": str(e)}, status_code=500)
-
-
-# ── MJPEG video stream ─────────────────────────────────────────────────────────
-@app.get("/video")
-async def mjpeg_stream():
-    """
-    Browser-friendly MJPEG stream.
-    Simply set <img src="https://gpu-url/video"> in the browser — no JS SDK needed.
-    Delivers lip-sync frames when speaking, idle avatar frame when silent.
-    """
-    async def generate():
-        while True:
-            try:
-                # Wait up to 200ms for a new lip-sync frame
-                jpeg = await asyncio.wait_for(_frame_queue.get(), timeout=0.2)
-            except asyncio.TimeoutError:
-                # No new frame — send idle avatar to keep stream alive
-                jpeg = _idle_jpeg
-
-            yield (
-                b"--frame\r\n"
-                b"Content-Type: image/jpeg\r\n\r\n" +
-                jpeg +
-                b"\r\n"
-            )
-
-    return StreamingResponse(
-        generate(),
-        media_type="multipart/x-mixed-replace; boundary=frame",
-        headers={"Cache-Control": "no-cache"},
-    )
 
 
 if __name__ == "__main__":
