@@ -88,11 +88,7 @@ class GeminiLiveClient:
     async def _handle_response(self, response):
         """Parse and dispatch a response chunk from Gemini."""
         try:
-            # Top-level raw audio bytes (direct audio stream)
-            if hasattr(response, "data") and response.data:
-                await self._on_audio(response.data)
-
-            # Server content (structured parts — preferred path)
+            # Server content (structured parts — single source of truth)
             if hasattr(response, "server_content") and response.server_content:
                 sc = response.server_content
 
@@ -105,8 +101,8 @@ class GeminiLiveClient:
                         # Text part — dispatch as AI text
                         if hasattr(part, "text") and part.text:
                             await self._on_text(part.text)
-                        # Audio inline data — dispatch as AI audio
-                        if hasattr(part, "inline_data") and part.inline_data:
+                        # Audio inline data — dispatch as AI audio (PCM bytes)
+                        if hasattr(part, "inline_data") and part.inline_data and part.inline_data.data:
                             await self._on_audio(part.inline_data.data)
 
                 # Input transcription (what the user said)
@@ -115,6 +111,11 @@ class GeminiLiveClient:
                     if hasattr(t, "text") and t.text:
                         is_final = getattr(t, "is_final", True)
                         await self._on_transcript(t.text, is_final)
+
+            # Fallback: top-level raw audio only if no server_content present
+            # (older API responses / compatibility path)
+            elif hasattr(response, "data") and response.data:
+                await self._on_audio(response.data)
 
         except Exception as e:
             logger.error(f"Error handling Gemini response: {e}")
