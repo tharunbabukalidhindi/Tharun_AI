@@ -49,6 +49,25 @@ async def startup():
     # Pre-encode idle frame (avatar at rest)
     _idle_jpeg = _encode_jpeg(np.array(avatar_img))
     logger.info("✓ GPU server ready — MJPEG stream active on /video")
+    # Pre-warm MuseTalk models so first response has no delay
+    logger.info("⏳ Pre-warming MuseTalk models...")
+    try:
+        import asyncio as _a
+        loop = _a.get_event_loop()
+        await loop.run_in_executor(None, _warmup_models)
+        logger.info("✓ Models warmed up and ready")
+    except Exception as e:
+        logger.warning(f"Model warmup failed (will lazy-load): {e}")
+
+
+def _warmup_models():
+    """Run a dummy inference to load models into VRAM before first real call."""
+    dummy_audio = bytes(3200)  # 100ms of silence at 16kHz 16-bit
+    try:
+        musetalk.process_audio(dummy_audio, avatar_img)
+        logger.info("✓ MuseTalk warmed up")
+    except Exception as e:
+        logger.warning(f"MuseTalk warmup: {e}")
 
 
 # ── Status ─────────────────────────────────────────────────────────────────────

@@ -207,10 +207,32 @@ async def health():
 
 @app.get("/api/gpu-video-url")
 async def gpu_video_url():
-    """Returns the GPU MJPEG stream URL for the browser to connect to directly."""
+    """Returns the local MJPEG proxy URL (browser-accessible, no auth needed)."""
     if GPU_API_URL:
-        return JSONResponse({"url": f"{GPU_API_URL}/video"})
+        return JSONResponse({"url": "/api/avatar-stream"})
     return JSONResponse({"url": None})
+
+
+@app.get("/api/avatar-stream")
+async def avatar_stream():
+    """Proxies the GPU MJPEG stream through localhost so the browser has no auth issues."""
+    if not GPU_API_URL:
+        return JSONResponse({"error": "no GPU configured"}, status_code=503)
+
+    async def proxy():
+        async with httpx.AsyncClient(timeout=None) as client:
+            try:
+                async with client.stream("GET", f"{GPU_API_URL}/video") as resp:
+                    async for chunk in resp.aiter_bytes(4096):
+                        yield chunk
+            except Exception as e:
+                logger.debug(f"MJPEG proxy ended: {e}")
+
+    return StreamingResponse(
+        proxy(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 # ── Conversation WebSocket ────────────────────────────────────────────────────
@@ -259,8 +281,14 @@ async def conversation_ws(websocket: WebSocket):
             except Exception as e:
                 logger.error(f"TTS error: {e}")
 
+    # Audio batch buffer — accumulate chunks before sending to GPU
+    _audio_batch: list[bytes] = []
+    _batch_duration_ms: int = 0
+    _BATCH_TARGET_MS: int = 600   # send to GPU every 600ms of audio
+
     async def on_ai_audio(audio_bytes: bytes):
         """Gemini produced raw PCM audio response."""
+        nonlocal _audio_batch, _batch_duration_ms
         audio_b64 = base64.b64encode(audio_bytes).decode()
         await websocket.send_text(json.dumps({
             "type": "ai_audio",
@@ -268,12 +296,19 @@ async def conversation_ws(websocket: WebSocket):
             "format": "pcm",
             "sampleRate": 24000,
         }))
-        # Fire-and-forget HTTP POST to GPU for lip-sync (no concurrency issues)
+        # Accumulate audio chunks; send to GPU in batches to avoid MuseTalk overload
         if gpu_http:
-            try:
-                await gpu_http.post("/audio", content=audio_bytes)
-            except Exception as e:
-                logger.debug(f"GPU audio POST failed: {e}")
+            _audio_batch.append(audio_bytes)
+            # 24000 Hz, 16-bit = 2 bytes/sample → duration_ms = len / (24000*2) * 1000
+            _batch_duration_ms += len(audio_bytes) * 1000 // (24000 * 2)
+            if _batch_duration_ms >= _BATCH_TARGET_MS:
+                batch = b"".join(_audio_batch)
+                _audio_batch = []
+                _batch_duration_ms = 0
+                try:
+                    await gpu_http.post("/audio", content=batch)
+                except Exception as e:
+                    logger.debug(f"GPU audio POST failed: {e}")
 
     async def on_transcript(text: str, is_final: bool):
         """Gemini transcribed what the user said."""
