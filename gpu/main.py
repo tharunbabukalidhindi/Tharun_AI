@@ -1,19 +1,18 @@
 import io
 import os
-import json
-import logging
 import asyncio
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
-import uvicorn
+import logging
 import numpy as np
 from PIL import Image
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
+import uvicorn
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
 logger = logging.getLogger("gpu-server")
 
-app = FastAPI(title="AI Video Agent - GPU Server", version="1.0.0")
+app = FastAPI(title="AI Video Agent - GPU Server", version="2.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 from pipeline.musetalk_engine import MuseTalkEngine
@@ -22,15 +21,37 @@ from pipeline.emage_engine import EMAGEEngine
 musetalk = MuseTalkEngine()
 emage    = EMAGEEngine()
 
+# ── Avatar image (loaded once at startup) ─────────────────────────────────────
+_PERSONA_PATH = "persona/persona.jpg"
+if os.path.exists(_PERSONA_PATH):
+    avatar_img = Image.open(_PERSONA_PATH).convert("RGB")
+    logger.info(f"✓ Loaded persona: {avatar_img.size}")
+else:
+    avatar_img = Image.new("RGB", (512, 512), color=(10, 10, 30))
+    logger.warning("⚠️ persona/persona.jpg not found — using dark placeholder")
+
+# ── Frame queue for MJPEG stream ───────────────────────────────────────────────
+_frame_queue: asyncio.Queue = None   # initialized on startup (needs event loop)
+_idle_jpeg: bytes = None
+
 
 def _encode_jpeg(frame_np: np.ndarray, quality: int = 75) -> bytes:
-    """Encode a numpy HxWx3 frame to JPEG bytes."""
     pil = Image.fromarray(frame_np.astype(np.uint8))
     buf = io.BytesIO()
     pil.save(buf, format="JPEG", quality=quality)
     return buf.getvalue()
 
 
+@app.on_event("startup")
+async def startup():
+    global _frame_queue, _idle_jpeg
+    _frame_queue = asyncio.Queue(maxsize=60)
+    # Pre-encode idle frame (avatar at rest)
+    _idle_jpeg = _encode_jpeg(np.array(avatar_img))
+    logger.info("✓ GPU server ready — MJPEG stream active on /video")
+
+
+# ── Status ─────────────────────────────────────────────────────────────────────
 @app.get("/status")
 async def status():
     return JSONResponse({
@@ -44,62 +65,70 @@ async def status():
     })
 
 
-@app.websocket("/stream")
-async def audio_stream_endpoint(websocket: WebSocket):
+# ── Audio ingestion ────────────────────────────────────────────────────────────
+@app.post("/audio")
+async def receive_audio(request: Request):
     """
-    Bidirectional WebSocket:
-      ← receives raw PCM audio from local orchestrator
-      → sends JPEG video frames back to local orchestrator
+    Receives raw PCM audio bytes from the local orchestrator.
+    Runs MuseTalk lip-sync + EMAGE body motion and queues JPEG frames
+    for the MJPEG stream.
     """
-    await websocket.accept()
-    logger.info("🔌 Local orchestrator connected to GPU stream")
-
-    # Load avatar reference image — CWD is ~/Tharun_AI when server starts
-    ref_image_path = "persona/persona.jpg"
-    if os.path.exists(ref_image_path):
-        avatar_img = Image.open(ref_image_path).convert("RGB")
-    else:
-        avatar_img = Image.new("RGB", (512, 512), color=(10, 10, 30))
+    audio_bytes = await request.body()
+    if not audio_bytes:
+        return JSONResponse({"frames": 0})
 
     try:
-        # Read and discard the setup handshake (livekit creds — not used here)
-        setup_raw = await websocket.receive_text()
-        setup_data = json.loads(setup_raw)
-        logger.info(f"Handshake received — session params: {list(setup_data.keys())}")
+        lip_frames   = musetalk.process_audio(audio_bytes, avatar_img)
+        num_frames   = len(lip_frames)
+        body_motions = emage.generate_motion(audio_bytes, num_frames)
 
-        # Send an idle frame immediately so the browser shows the avatar
-        idle_frame = np.array(avatar_img)
-        await websocket.send_bytes(_encode_jpeg(idle_frame))
+        queued = 0
+        for idx in range(num_frames):
+            frame  = lip_frames[idx]
+            dy     = int(body_motions[idx]["body_y_offset"])
+            if dy:
+                frame = np.roll(frame, dy, axis=0)
+            jpeg = _encode_jpeg(frame)
+            if not _frame_queue.full():
+                _frame_queue.put_nowait(jpeg)
+                queued += 1
 
-        # Main loop — receive audio, generate + stream frames
-        while True:
-            audio_chunk = await websocket.receive_bytes()
+        return JSONResponse({"frames": queued})
 
-            # A. MuseTalk: lip-sync frames
-            lip_frames = musetalk.process_audio(audio_chunk, avatar_img)
-            num_frames = len(lip_frames)
-
-            # B. EMAGE: body motion offsets
-            body_motions = emage.generate_motion(audio_chunk, num_frames)
-
-            # C. Composite + stream each frame back as JPEG
-            for idx in range(num_frames):
-                frame = lip_frames[idx]
-                motion = body_motions[idx]
-
-                dy = int(motion["body_y_offset"])
-                if dy != 0:
-                    frame = np.roll(frame, dy, axis=0)
-
-                jpeg_bytes = _encode_jpeg(frame)
-                await websocket.send_bytes(jpeg_bytes)
-
-            await asyncio.sleep(0.01)
-
-    except WebSocketDisconnect:
-        logger.info("🔌 Local orchestrator disconnected")
     except Exception as e:
-        logger.error(f"Error in streaming loop: {e}", exc_info=True)
+        logger.error(f"Audio processing error: {e}", exc_info=True)
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ── MJPEG video stream ─────────────────────────────────────────────────────────
+@app.get("/video")
+async def mjpeg_stream():
+    """
+    Browser-friendly MJPEG stream.
+    Simply set <img src="https://gpu-url/video"> in the browser — no JS SDK needed.
+    Delivers lip-sync frames when speaking, idle avatar frame when silent.
+    """
+    async def generate():
+        while True:
+            try:
+                # Wait up to 200ms for a new lip-sync frame
+                jpeg = await asyncio.wait_for(_frame_queue.get(), timeout=0.2)
+            except asyncio.TimeoutError:
+                # No new frame — send idle avatar to keep stream alive
+                jpeg = _idle_jpeg
+
+            yield (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n\r\n" +
+                jpeg +
+                b"\r\n"
+            )
+
+    return StreamingResponse(
+        generate(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 if __name__ == "__main__":

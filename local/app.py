@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
-import websockets
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
@@ -206,6 +205,14 @@ async def health():
     return {"status": "online", "service": "AI Video Agent", "version": "1.0.0"}
 
 
+@app.get("/api/gpu-video-url")
+async def gpu_video_url():
+    """Returns the GPU MJPEG stream URL for the browser to connect to directly."""
+    if GPU_API_URL:
+        return JSONResponse({"url": f"{GPU_API_URL}/video"})
+    return JSONResponse({"url": None})
+
+
 # ── Conversation WebSocket ────────────────────────────────────────────────────
 
 @app.websocket("/ws/conversation")
@@ -254,7 +261,6 @@ async def conversation_ws(websocket: WebSocket):
 
     async def on_ai_audio(audio_bytes: bytes):
         """Gemini produced raw PCM audio response."""
-        nonlocal gpu_ws
         audio_b64 = base64.b64encode(audio_bytes).decode()
         await websocket.send_text(json.dumps({
             "type": "ai_audio",
@@ -262,26 +268,12 @@ async def conversation_ws(websocket: WebSocket):
             "format": "pcm",
             "sampleRate": 24000,
         }))
-        if gpu_ws:
+        # Fire-and-forget HTTP POST to GPU for lip-sync (no concurrency issues)
+        if gpu_http:
             try:
-                await gpu_ws.send(audio_bytes)
+                await gpu_http.post("/audio", content=audio_bytes)
             except Exception as e:
-                logger.warning(f"GPU WebSocket dead, disabling: {e}")
-                gpu_ws = None  # Stop retrying on every chunk
-
-    async def gpu_frame_reader(ws):
-        """Background task: reads JPEG frames from GPU WebSocket → forwards to browser."""
-        try:
-            async for frame_bytes in ws:
-                if not isinstance(frame_bytes, bytes):
-                    continue
-                frame_b64 = base64.b64encode(frame_bytes).decode()
-                await websocket.send_text(json.dumps({
-                    "type": "video_frame",
-                    "data": frame_b64,
-                }))
-        except Exception as e:
-            logger.debug(f"GPU frame reader ended: {e}")
+                logger.debug(f"GPU audio POST failed: {e}")
 
     async def on_transcript(text: str, is_final: bool):
         """Gemini transcribed what the user said."""
@@ -302,7 +294,7 @@ async def conversation_ws(websocket: WebSocket):
         if CARTESIA_API_KEY:
             cartesia = CartesiaTTS(api_key=CARTESIA_API_KEY, voice_id=CARTESIA_VOICE_ID)
 
-        gpu_ws = None
+        gpu_http = httpx.AsyncClient(base_url=GPU_API_URL, timeout=5.0) if GPU_API_URL else None
 
         while True:
             raw = await websocket.receive_text()
@@ -311,16 +303,8 @@ async def conversation_ws(websocket: WebSocket):
 
             # ── Start conversation ─────────────────────────────────────────
             if msg_type == "start_conversation":
-                if GPU_WS_URL:
-                    try:
-                        logger.info(f"Connecting to GPU websocket at {GPU_WS_URL}...")
-                        gpu_ws = await websockets.connect(GPU_WS_URL)
-                        # GPU server reads and discards this — send simple session info
-                        await gpu_ws.send(json.dumps({"session": "avatar-stream"}))
-                        asyncio.create_task(gpu_frame_reader(gpu_ws))
-                        logger.info("✓ Connected and handshake sent to GPU server")
-                    except Exception as e:
-                        logger.error(f"Failed to connect to GPU WebSocket: {e}")
+                if GPU_API_URL:
+                    logger.info(f"GPU HTTP client ready → {GPU_API_URL}")
                 if gemini:
                     await set_status("gemini", "connecting")
                     try:

@@ -643,6 +643,25 @@ function onConversationStarted() {
   dom.btnStopSession.disabled  = false;
   dom.micBtn.disabled = false;
   dom.micLabel.textContent = 'Speak now';
+
+  // Switch avatar to live MJPEG stream from GPU
+  fetch('/api/gpu-video-url')
+    .then(r => r.json())
+    .then(data => {
+      if (data.url) {
+        const stream = document.getElementById('avatarStream');
+        const still  = document.getElementById('avatarImage');
+        if (stream) {
+          stream.src = data.url;
+          stream.style.display = 'block';
+          if (still) still.style.opacity = '0';
+          // Update stream badge
+          const badge = document.getElementById('streamBadge');
+          if (badge) badge.textContent = 'GPU Lip-Sync Live';
+        }
+      }
+    })
+    .catch(() => {}); // Graceful fallback — static image stays visible
 }
 
 function onConversationStopped() {
