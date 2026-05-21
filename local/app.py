@@ -17,6 +17,8 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+import httpx
+import websockets
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
@@ -96,6 +98,31 @@ async def set_status(service: str, status: str):
     if service in service_status:
         service_status[service]["status"] = status
     await broadcast({"type": "status", "services": service_status})
+
+
+async def check_gpu_health_loop():
+    """Periodically queries the GPU server health/telemetry."""
+    while True:
+        if GPU_API_URL:
+            try:
+                async with httpx.AsyncClient(timeout=3.0) as client:
+                    response = await client.get(f"{GPU_API_URL}/status")
+                    if response.status_code == 200:
+                        await set_status("gpu_server", "online")
+                        await set_status("musetalk", "online")
+                        await set_status("emage", "online")
+                        await set_status("livekit_server", "online")
+                    else:
+                        await set_status("gpu_server", "offline")
+                        await set_status("musetalk", "offline")
+                        await set_status("emage", "offline")
+                        await set_status("livekit_server", "offline")
+            except Exception:
+                await set_status("gpu_server", "offline")
+                await set_status("musetalk", "offline")
+                await set_status("emage", "offline")
+                await set_status("livekit_server", "offline")
+        await asyncio.sleep(5.0)
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -231,6 +258,11 @@ async def conversation_ws(websocket: WebSocket):
             "format": "pcm",
             "sampleRate": 24000,
         }))
+        if gpu_ws:
+            try:
+                await gpu_ws.send(audio_bytes)
+            except Exception as e:
+                logger.error(f"Error forwarding audio to GPU: {e}")
 
     async def on_transcript(text: str, is_final: bool):
         """Gemini transcribed what the user said."""
@@ -251,6 +283,8 @@ async def conversation_ws(websocket: WebSocket):
         if CARTESIA_API_KEY:
             cartesia = CartesiaTTS(api_key=CARTESIA_API_KEY, voice_id=CARTESIA_VOICE_ID)
 
+        gpu_ws = None
+
         while True:
             raw = await websocket.receive_text()
             msg = json.loads(raw)
@@ -258,6 +292,21 @@ async def conversation_ws(websocket: WebSocket):
 
             # ── Start conversation ─────────────────────────────────────────
             if msg_type == "start_conversation":
+                if GPU_WS_URL:
+                    try:
+                        from streaming.livekit_client import LiveKitTokens
+                        lk = LiveKitTokens(LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
+                        gpu_token = lk.generate_publisher_token()
+                        logger.info(f"Connecting to GPU websocket at {GPU_WS_URL}...")
+                        gpu_ws = await websockets.connect(GPU_WS_URL)
+                        handshake = {
+                            "livekit_url": LIVEKIT_URL,
+                            "livekit_token": gpu_token
+                        }
+                        await gpu_ws.send(json.dumps(handshake))
+                        logger.info("✓ Connected and handshake sent to GPU server")
+                    except Exception as e:
+                        logger.error(f"Failed to connect to GPU WebSocket: {e}")
                 if gemini:
                     await set_status("gemini", "connecting")
                     try:
@@ -315,6 +364,12 @@ async def conversation_ws(websocket: WebSocket):
                     await gemini.disconnect()
                     await set_status("gemini", "offline")
                     await set_status("cartesia", "offline")
+                if gpu_ws:
+                    try:
+                        await gpu_ws.close()
+                    except Exception:
+                        pass
+                    gpu_ws = None
                 logger.info("Conversation stopped")
                 await websocket.send_text(json.dumps({"type": "conversation_stopped"}))
 
@@ -337,6 +392,12 @@ async def conversation_ws(websocket: WebSocket):
         logger.error(f"WebSocket error: {e}")
     finally:
         # Cleanup
+        if gpu_ws:
+            try:
+                await gpu_ws.close()
+            except Exception:
+                pass
+            gpu_ws = None
         if gemini and getattr(gemini, "is_connected", False):
             try:
                 await gemini.disconnect()
@@ -361,6 +422,8 @@ async def on_startup():
     logger.info("━" * 55)
     logger.info(f"  Open: http://localhost:{APP_PORT}")
     logger.info("━" * 55)
+    if GPU_API_URL:
+        asyncio.create_task(check_gpu_health_loop())
 
 
 # ── Entry Point ───────────────────────────────────────────────────────────────
