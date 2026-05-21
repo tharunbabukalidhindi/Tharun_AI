@@ -231,7 +231,7 @@ async def conversation_ws(websocket: WebSocket):
     # Engine instances (per connection)
     gemini: Optional[object] = None
     cartesia: Optional[object] = None
-    session_modalities: list = ["AUDIO"]  # default; updated on start_conversation
+    session_modalities = ["AUDIO"]  # default; updated on start_conversation
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -315,7 +315,6 @@ async def conversation_ws(websocket: WebSocket):
                 if gemini:
                     await set_status("gemini", "connecting")
                     try:
-                        nonlocal session_modalities
                         session_modalities = msg.get("modalities", ["AUDIO"])
                         await gemini.connect(
                             on_text=on_ai_text,
