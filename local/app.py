@@ -313,16 +313,10 @@ async def conversation_ws(websocket: WebSocket):
             if msg_type == "start_conversation":
                 if GPU_WS_URL:
                     try:
-                        from streaming.livekit_client import LiveKitTokens
-                        lk = LiveKitTokens(LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
-                        gpu_token = lk.generate_publisher_token()
                         logger.info(f"Connecting to GPU websocket at {GPU_WS_URL}...")
                         gpu_ws = await websockets.connect(GPU_WS_URL)
-                        handshake = {
-                            "livekit_url": LIVEKIT_URL,
-                            "livekit_token": gpu_token
-                        }
-                        await gpu_ws.send(json.dumps(handshake))
+                        # GPU server reads and discards this — send simple session info
+                        await gpu_ws.send(json.dumps({"session": "avatar-stream"}))
                         asyncio.create_task(gpu_frame_reader(gpu_ws))
                         logger.info("✓ Connected and handshake sent to GPU server")
                     except Exception as e:
