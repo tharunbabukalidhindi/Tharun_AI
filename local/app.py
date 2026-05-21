@@ -251,6 +251,7 @@ async def conversation_ws(websocket: WebSocket):
 
     async def on_ai_audio(audio_bytes: bytes):
         """Gemini produced raw PCM audio response."""
+        nonlocal gpu_ws
         audio_b64 = base64.b64encode(audio_bytes).decode()
         await websocket.send_text(json.dumps({
             "type": "ai_audio",
