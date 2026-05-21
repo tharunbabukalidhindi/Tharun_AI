@@ -262,7 +262,8 @@ async def conversation_ws(websocket: WebSocket):
             try:
                 await gpu_ws.send(audio_bytes)
             except Exception as e:
-                logger.error(f"Error forwarding audio to GPU: {e}")
+                logger.warning(f"GPU WebSocket dead, disabling: {e}")
+                gpu_ws = None  # Stop retrying on every chunk
 
     async def on_transcript(text: str, is_final: bool):
         """Gemini transcribed what the user said."""

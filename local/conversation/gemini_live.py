@@ -92,11 +92,15 @@ class GeminiLiveClient:
             if hasattr(response, "data") and response.data:
                 await self._on_audio(response.data)
 
+            # Top-level text fallback (simple responses)
+            if hasattr(response, "text") and response.text:
+                await self._on_text(response.text)
+
             # Server content (structured parts)
             if hasattr(response, "server_content") and response.server_content:
                 sc = response.server_content
 
-                # Model turn parts (text + audio)
+                # Model turn parts (text + audio inline data)
                 if hasattr(sc, "model_turn") and sc.model_turn:
                     for part in sc.model_turn.parts:
                         # Skip internal thought/thinking process parts
@@ -106,11 +110,6 @@ class GeminiLiveClient:
                             await self._on_text(part.text)
                         if hasattr(part, "inline_data") and part.inline_data:
                             await self._on_audio(part.inline_data.data)
-
-            # Fallback to top-level text only if there is no structured server content
-            else:
-                if hasattr(response, "text") and response.text:
-                    await self._on_text(response.text)
 
                 # Input transcription (what the user said)
                 if hasattr(sc, "input_transcription") and sc.input_transcription:
