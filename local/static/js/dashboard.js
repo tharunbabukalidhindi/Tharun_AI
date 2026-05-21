@@ -596,6 +596,16 @@ function handleMessage(msg) {
       playAudio(msg.audio, msg.format, msg.sampleRate);
       break;
 
+    case 'video_frame':
+      // Live JPEG frame from GPU — update avatar image directly
+      if (msg.data) {
+        const avatarImg = document.getElementById('avatarImage');
+        if (avatarImg) {
+          avatarImg.src = 'data:image/jpeg;base64,' + msg.data;
+        }
+      }
+      break;
+
     case 'error':
       addMessage('ai', 'An error occurred: ' + msg.message);
       break;

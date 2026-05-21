@@ -269,6 +269,20 @@ async def conversation_ws(websocket: WebSocket):
                 logger.warning(f"GPU WebSocket dead, disabling: {e}")
                 gpu_ws = None  # Stop retrying on every chunk
 
+    async def gpu_frame_reader(ws):
+        """Background task: reads JPEG frames from GPU WebSocket → forwards to browser."""
+        try:
+            async for frame_bytes in ws:
+                if not isinstance(frame_bytes, bytes):
+                    continue
+                frame_b64 = base64.b64encode(frame_bytes).decode()
+                await websocket.send_text(json.dumps({
+                    "type": "video_frame",
+                    "data": frame_b64,
+                }))
+        except Exception as e:
+            logger.debug(f"GPU frame reader ended: {e}")
+
     async def on_transcript(text: str, is_final: bool):
         """Gemini transcribed what the user said."""
         await websocket.send_text(json.dumps({
@@ -309,6 +323,7 @@ async def conversation_ws(websocket: WebSocket):
                             "livekit_token": gpu_token
                         }
                         await gpu_ws.send(json.dumps(handshake))
+                        asyncio.create_task(gpu_frame_reader(gpu_ws))
                         logger.info("✓ Connected and handshake sent to GPU server")
                     except Exception as e:
                         logger.error(f"Failed to connect to GPU WebSocket: {e}")
