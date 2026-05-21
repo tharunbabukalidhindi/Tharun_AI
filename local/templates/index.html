@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ agent_name }} — Enterprise AI Operations Control</title>
+  <meta name="description" content="Real-time AI operations dashboard with talking avatar" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+
+  <!-- ── APP LAYOUT ──────────────────────────────────────────────── -->
+  <div class="app-layout">
+    
+    <!-- ── SIDEBAR NAV (6 Modules) ────────────────────────────────── -->
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <div class="brand-logo">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+            <rect width="24" height="24" rx="6" fill="url(#brandGrad)"/>
+            <path d="M7 12l3 3 7-7" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs>
+              <linearGradient id="brandGrad" x1="0" y1="0" x2="24" y2="24">
+                <stop offset="0%" stop-color="#ff9d6c"/>
+                <stop offset="100%" stop-color="#6366f1"/>
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <span class="brand-name">MR. BRAIN</span>
+          <span class="brand-sub">Enterprise Copilot</span>
+        </div>
+      </div>
+
+      <nav class="nav-menu">
+        <!-- Module 1 -->
+        <button class="nav-item active" data-tab="incident-change">
+          <span class="nav-icon orange-icon">🟠</span>
+          <div class="nav-info">
+            <span class="nav-title">Incident & Change</span>
+            <span class="nav-desc">RCA & Remediation</span>
+          </div>
+        </button>
+
+        <!-- Module 2 -->
+        <button class="nav-item" data-tab="observability">
+          <span class="nav-icon green-icon">🟢</span>
+          <div class="nav-info">
+            <span class="nav-title">Observability & Monitoring</span>
+            <span class="nav-desc">Insights & Anomaly</span>
+          </div>
+        </button>
+
+        <!-- Module 3 -->
+        <button class="nav-item" data-tab="hyper-transaction">
+          <span class="nav-icon blue-icon">🔵</span>
+          <div class="nav-info">
+            <span class="nav-title">Hyper-Transaction</span>
+            <span class="nav-desc">UPI & Latency</span>
+          </div>
+        </button>
+
+        <!-- Module 4 -->
+        <button class="nav-item" data-tab="security-resilience">
+          <span class="nav-icon purple-icon">🟣</span>
+          <div class="nav-info">
+            <span class="nav-title">Security & Resilience</span>
+            <span class="nav-desc">Kill Switch & Posture</span>
+          </div>
+        </button>
+
+        <!-- Module 5 -->
+        <button class="nav-item" data-tab="performance-capacity">
+          <span class="nav-icon gray-icon">⚪</span>
+          <div class="nav-info">
+            <span class="nav-title">Performance & Capacity</span>
+            <span class="nav-desc">Capacity & FinOps</span>
+          </div>
+        </button>
+
+        <!-- Module 6 -->
+        <button class="nav-item" data-tab="predictive-intel">
+          <span class="nav-icon red-icon">🔴</span>
+          <div class="nav-info">
+            <span class="nav-title">Predictive Intelligence</span>
+            <span class="nav-desc">Trend & Correlation</span>
+          </div>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="gpu-status-card">
+          <div class="status-header">
+            <span class="status-dot offline" id="gpuStatusDot"></span>
+            <span class="status-label">GPU Node (L40S)</span>
+          </div>
+          <div class="vram-stat">
+            <span class="vram-val" id="vramVal">0.0 / 48 GB</span>
+            <div class="vram-progress"><div class="vram-fill" id="vramFill" style="width: 0%"></div></div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ── MAIN CONTENT WORKSPACE ──────────────────────────────────── -->
+    <div class="main-workspace">
+      
+      <!-- Top Header -->
+      <header class="workspace-header">
+        <div class="header-left">
+          <h1 class="current-module-title" id="moduleTitle">Incident & Change Management</h1>
+          <p class="current-module-desc" id="moduleDesc">Perform Root Cause Analysis (RCA), monitor active incidents, and coordinate remediation.</p>
+        </div>
+        <div class="header-right">
+          <div class="system-status-pills">
+            <div class="status-pill" id="pill-dashboard">
+              <span class="dot online"></span> Dashboard
+            </div>
+            <div class="status-pill" id="pill-gemini">
+              <span class="dot offline"></span> Gemini Live
+            </div>
+            <div class="status-pill" id="pill-cartesia">
+              <span class="dot offline"></span> Cartesia TTS
+            </div>
+          </div>
+          <button class="action-btn header-action" id="btnSwitchPersona">Switch Persona</button>
+        </div>
+      </header>
+
+      <!-- Dynamic Tab Panels -->
+      <div class="tab-content-container">
+        
+        <!-- MODULE 1: INCIDENT & CHANGE -->
+        <div class="tab-panel active" id="tab-incident-change">
+          <div class="dashboard-grid">
+            <div class="metric-card orange">
+              <div class="metric-header">
+                <span>Active Incidents</span>
+                <span class="metric-tag">Critical</span>
+              </div>
+              <div class="metric-value">2</div>
+              <div class="metric-footer">1 Auto-mitigating</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-header">
+                <span>Change Request Status</span>
+                <span class="metric-tag">Pending</span>
+              </div>
+              <div class="metric-value">5</div>
+              <div class="metric-footer">3 Scheduled for EOD</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-header">
+                <span>Mean Time to Resolution (MTTR)</span>
+                <span class="metric-tag">Average</span>
+              </div>
+              <div class="metric-value">14m</div>
+              <div class="metric-footer">-2.4m from last week</div>
+            </div>
+            
+            <!-- Runbook & Logs Panel -->
+            <div class="data-card span-2">
+              <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <h3>Incident Diagnosis & Remediation Runbook</h3>
+                <div class="filter-tabs">
+                  <button class="filter-btn active" id="runbookFilterAll" onclick="filterRunbooks('all')">All (2)</button>
+                  <button class="filter-btn" id="runbookFilterActive" onclick="filterRunbooks('active')">Active</button>
+                  <button class="filter-btn" id="runbookFilterMitigated" onclick="filterRunbooks('mitigated')">Mitigated</button>
+                </div>
+              </div>
+              <div class="card-body">
+                <div class="runbook-list">
+                  <div class="runbook-item active" data-status="active" id="rb-ora-04031">
+                    <div class="runbook-meta">
+                      <span class="severity-badge critical">CRITICAL</span>
+                      <span class="timestamp">15:02:11</span>
+                    </div>
+                    <h4 class="runbook-title">Oracle DB ORA-04031: Out of Shared Pool Memory</h4>
+                    <p class="runbook-desc">Shared memory allocation error on instance orcl_pdb1. Memory reclamation is required.</p>
+                    <div class="runbook-actions">
+                      <button class="action-btn-sm primary" id="btnRunRemediation" onclick="triggerDBARemediation()">Auto-Run Remediation</button>
+                      <button class="action-btn-sm" onclick="askAvatarAboutIncident()">Ask Assistant</button>
+                    </div>
+                  </div>
+                  <div class="runbook-item" data-status="mitigated" id="rb-k8s-pod">
+                    <div class="runbook-meta">
+                      <span class="severity-badge warning">WARNING</span>
+                      <span class="timestamp">14:55:03</span>
+                    </div>
+                    <h4 class="runbook-title">Kubernetes Cluster API Pod Eviction Alert</h4>
+                    <p class="runbook-desc">Node node-m4-app1 memory limit exceeded. Node pressure detected.</p>
+                    <div class="runbook-actions">
+                      <span class="status-badge secure" style="padding: 4px 8px;">Auto-Mitigated ✓</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Terminal Live Logs Stream -->
+            <div class="data-card">
+              <div class="card-header">
+                <h3>Live Telemetry Console</h3>
+              </div>
+              <div class="card-body">
+                <div class="terminal-logs" id="terminalLogs">
+                  <div class="log-line">[SYS] Initializing local diagnostics...</div>
+                  <div class="log-line">[DB] Connected to instance orcl_pdb1.</div>
+                  <div class="log-line">[K8S] Watching namespace default.</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- RCA Incident Timeline Block -->
+            <div class="data-card span-3">
+              <div class="card-header">
+                <h3>Root Cause Analysis (RCA) & Incident Chronology</h3>
+              </div>
+              <div class="card-body">
+                <div class="rca-timeline-horizontal">
+                  <div class="timeline-step finished">
+                    <div class="step-circle">1</div>
+                    <div class="step-content">
+                      <span class="step-time">14:50:00</span>
+                      <strong>Memory Fragmentation</strong>
+                      <p>DB Shared pool allocation drift detected.</p>
+                    </div>
+                  </div>
+                  <div class="timeline-step finished">
+                    <div class="step-circle">2</div>
+                    <div class="step-content">
+                      <span class="step-time">14:55:03</span>
+                      <strong>Pod Pressure Alert</strong>
+                      <p>K8s node scheduler eviction warn.</p>
+                    </div>
+                  </div>
+                  <div class="timeline-step error">
+                    <div class="step-circle">3</div>
+                    <div class="step-content">
+                      <span class="step-time">15:02:11</span>
+                      <strong>Out of Memory Outage</strong>
+                      <p>ORA-04031 memory allocation fault.</p>
+                    </div>
+                  </div>
+                  <div class="timeline-step pending" id="rcaTimelineStep4">
+                    <div class="step-circle">4</div>
+                    <div class="step-content">
+                      <span class="step-time">Staged</span>
+                      <strong>Heap Compaction</strong>
+                      <p>Reclaim memory fragmentation block.</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- MODULE 2: OBSERVABILITY -->
+        <div class="tab-panel" id="tab-observability">
+          <div class="dashboard-grid">
+            <div class="metric-card green">
+              <div class="metric-header">
+                <span>System Health Score</span>
+                <span class="metric-tag">Good</span>
+              </div>
+              <div class="metric-value">98.4%</div>
+              <div class="metric-footer">All services responding normally</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-header">
+                <span>Anomaly Alerts (24h)</span>
+                <span class="metric-tag">Low</span>
+              </div>
+              <div class="metric-value">12</div>
+              <div class="metric-footer">-5% decrease since yesterday</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-header">
+                <span>API Success Rate</span>
+                <span class="metric-tag">Target: 99.9%</span>
+              </div>
+              <div class="metric-value">99.96%</div>
+              <div class="metric-footer">Stable latency across all gateways</div>
+            </div>
+
+            <!-- Heatmap Data Card -->
+            <div class="data-card span-2">
+              <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <h3>Observability Insights & Anomaly Heatmap</h3>
+                <div class="filter-tabs">
+                  <button class="filter-btn active" id="anomalyFilterAll" onclick="filterAnomalies('all')">All</button>
+                  <button class="filter-btn" id="anomalyFilterCritical" onclick="filterAnomalies('critical')">Critical</button>
+                  <button class="filter-btn" id="anomalyFilterWarning" onclick="filterAnomalies('warning')">Warning</button>
+                  <button class="filter-btn" id="anomalyFilterSecure" onclick="filterAnomalies('secure')">Normal</button>
+                </div>
+              </div>
+              <div class="card-body">
+                <div class="grid-heatmap">
+                  <div class="heatmap-container" id="anomalyHeatmap"></div>
+                </div>
+                <div class="heatmap-legend" style="display: flex; gap: 12px; margin-top: 12px; font-size: 10px; color: var(--text-muted);">
+                  <span style="display: flex; align-items: center; gap: 4px;"><span style="width: 8px; height: 8px; background: rgba(16, 185, 129, 0.7); border-radius: 2px;"></span> Normal</span>
+                  <span style="display: flex; align-items: center; gap: 4px;"><span style="width: 8px; height: 8px; background: rgba(255, 157, 108, 0.7); border-radius: 2px;"></span> Warning</span>
+                  <span style="display: flex; align-items: center; gap: 4px;"><span style="width: 8px; height: 8px; background: rgba(244, 63, 94, 0.7); border-radius: 2px;"></span> Critical</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Cluster Node Health Card -->
+            <div class="data-card">
+              <div class="card-header">
+                <h3>Cluster Resource Status</h3>
+              </div>
+              <div class="card-body">
+                <div class="node-resource-list" style="display: flex; flex-direction: column; gap: 12px;">
+                  <div class="node-resource-item">
+                    <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px;">
+                      <span style="font-family: var(--font-mono); font-weight: 600;">node-m4-app1</span>
+                      <span style="color: var(--color-green);">32% CPU</span>
+                    </div>
+                    <div style="height: 6px; background: rgba(255, 255, 255, 0.05); border-radius: 3px; overflow: hidden;">
+                      <div style="width: 32%; height: 100%; background: var(--color-green); border-radius: 3px;"></div>
+                    </div>
+                  </div>
+                  <div class="node-resource-item">
+                    <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px;">
+                      <span style="font-family: var(--font-mono); font-weight: 600;">node-m4-app2</span>
+                      <span style="color: var(--color-orange);">78% CPU</span>
+                    </div>
+                    <div style="height: 6px; background: rgba(255, 255, 255, 0.05); border-radius: 3px; overflow: hidden;">
+                      <div style="width: 78%; height: 100%; background: var(--color-orange); border-radius: 3px;"></div>
+                    </div>
+                  </div>
+                  <div class="node-resource-item">
+                    <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px;">
+                      <span style="font-family: var(--font-mono); font-weight: 600;">orcl_pdb1</span>
+                      <span style="color: var(--color-red);">94% Memory</span>
+                    </div>
+                    <div style="height: 6px; background: rgba(255, 255, 255, 0.05); border-radius: 3px; overflow: hidden;">
+                      <div style="width: 94%; height: 100%; background: var(--color-red); border-radius: 3px;"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- MODULE 3: HYPER-TRANSACTION -->
+        <div class="tab-panel" id="tab-hyper-transaction">
+          <div class="dashboard-grid">
+            <div class="metric-card blue">
+              <div class="metric-header">
+                <span>UPI TPS (Transactions/sec)</span>
+                <span class="metric-tag">Realtime</span>
+              </div>
+              <div class="metric-value" id="tpsValue">2,410</div>
+              <div class="metric-footer">Processing high volume</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-header">
+                <span>EOD / BOD Processing</span>
+                <span class="metric-tag">Status</span>
+              </div>
+              <div class="metric-value">ACTIVE</div>
+              <div class="metric-footer">EOD batch 82% complete</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-header">
+                <span>Avg Transaction Latency</span>
+                <span class="metric-tag">Normal</span>
+              </div>
+              <div class="metric-value" id="avgLatencyVal">48ms</div>
+              <div class="metric-footer">DB connections scaled up</div>
+            </div>
+
+            <!-- Real-time Latency Chart -->
+            <div class="data-card span-2">
+              <div class="card-header">
+                <h3>UPI Transaction Monitoring & Latency (Real-time)</h3>
+              </div>
+              <div class="card-body">
+                <div class="transaction-flow-chart">
+                  <div class="chart-timeline" id="latencyTimeline"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Gateway Health Grid -->
+            <div class="data-card">
+              <div class="card-header">
+                <h3>Bank Gateway APIs</h3>
+              </div>
+              <div class="card-body">
+                <div class="gateway-list" style="display: flex; flex-direction: column; gap: 10px;">
+                  <div class="gateway-row" style="display: flex; justify-content: space-between; align-items: center; font-size: 11px;">
+                    <span>SBI Gateway</span>
+                    <span class="status-badge secure" id="gate-sbi">14ms ✓</span>
+                  </div>
+                  <div class="gateway-row" style="display: flex; justify-content: space-between; align-items: center; font-size: 11px;">
+                    <span>HDFC Gateway</span>
+                    <span class="status-badge secure" id="gate-hdfc">18ms ✓</span>
+                  </div>
+                  <div class="gateway-row" style="display: flex; justify-content: space-between; align-items: center; font-size: 11px;">
+                    <span>ICICI Gateway</span>
+                    <span class="status-badge secure" id="gate-icici">22ms ✓</span>
+                  </div>
+                  <div class="gateway-row" style="display: flex; justify-content: space-between; align-items: center; font-size: 11px;">
+                    <span>AXIS Gateway</span>
+                    <span class="status-badge secure" id="gate-axis">19ms ✓</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Live Transaction Feed Ledger -->
+            <div class="data-card span-3">
+              <div class="card-header">
+                <h3>Live Transaction Ledger Stream</h3>
+              </div>
+              <div class="card-body">
+                <div class="table-container">
+                  <table class="data-table" id="transactionLedgerTable">
+                    <thead>
+                      <tr>
+                        <th>Transaction ID</th>
+                        <th>Gateway</th>
+                        <th>Latency</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody id="transactionLedgerBody">
+                      <tr>
+                        <td>TXN-98721203</td>
+                        <td>HDFC</td>
+                        <td>18ms</td>
+                        <td><span class="status-badge secure">SUCCESS</span></td>
+                      </tr>
+                      <tr>
+                        <td>TXN-98721202</td>
+                        <td>SBI</td>
+                        <td>14ms</td>
+                        <td><span class="status-badge secure">SUCCESS</span></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+
+        <!-- MODULE 4: SECURITY & RESILIENCE -->
+        <div class="tab-panel" id="tab-security-resilience">
+          <div class="dashboard-grid">
+            <div class="metric-card purple">
+              <div class="metric-header">
+                <span>Threat Level Score</span>
+                <span class="metric-tag">Secure</span>
+              </div>
+              <div class="metric-value" id="securityThreatLevelVal">LOW</div>
+              <div class="metric-footer">0 active intrusion events</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-header">
+                <span>Security Assessment</span>
+                <span class="metric-tag">Score</span>
+              </div>
+              <div class="metric-value">A+</div>
+              <div class="metric-footer">98% compliance reached</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-header">
+                <span>Kill Switch State</span>
+                <span class="metric-tag">Armed</span>
+              </div>
+              <div class="metric-value safe" id="killSwitchStateVal">SAFE</div>
+              <div class="metric-footer">No active rollbacks triggered</div>
+            </div>
+
+            <!-- Network Traffic Flow Assessment -->
+            <div class="data-card span-2">
+              <div class="card-header">
+                <h3>Live Network Traffic & Firewall Audit</h3>
+              </div>
+              <div class="card-body">
+                <div class="table-container" style="max-height: 200px; overflow-y: auto;">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Source IP</th>
+                        <th>Path/Endpoint</th>
+                        <th>Threat Score</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody id="firewallAuditBody">
+                      <tr>
+                        <td>192.168.10.45</td>
+                        <td><code>/api/v1/auth/login</code></td>
+                        <td><span class="status-badge secure">0.05</span></td>
+                        <td><span class="status-badge secure" style="background: rgba(16, 185, 129, 0.15); color: var(--color-green);">ALLOW</span></td>
+                      </tr>
+                      <tr>
+                        <td>10.231.42.112</td>
+                        <td><code>/admin/config/db</code></td>
+                        <td><span class="status-badge warning">0.72</span></td>
+                        <td><span class="status-badge warning" style="background: rgba(255, 157, 108, 0.15); color: var(--color-orange);">AUDIT</span></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <!-- Emergency Rollback / Kill Switch -->
+            <div class="data-card">
+              <div class="card-header">
+                <h3>Emergency Rollback / Kill Switch</h3>
+              </div>
+              <div class="card-body centered" style="position: relative;">
+                <button class="killswitch-btn" id="btnKillswitch" onclick="triggerEmergencyKill()">
+                  <span class="k-label" id="killswitchLabel">ACTIVATE ROLLBACK</span>
+                  <span class="k-status" id="killswitchStatus">Armed & Ready</span>
+                </button>
+                <div id="killswitchCountdownContainer" style="display: none; width: 100%; margin-top: 15px; text-align: center;">
+                  <div style="font-family: var(--font-mono); font-size: 14px; color: var(--color-red); margin-bottom: 6px;" id="killswitchTimerText">ROLLING BACK IN: 5s</div>
+                  <div style="height: 6px; background: rgba(255, 255, 255, 0.05); border-radius: 3px; overflow: hidden;">
+                    <div id="killswitchProgressBar" style="width: 100%; height: 100%; background: var(--color-red); border-radius: 3px; transition: width 1s linear;"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+
+        <!-- MODULE 5: PERFORMANCE & CAPACITY -->
+        <div class="tab-panel" id="tab-performance-capacity">
+          <div class="dashboard-grid">
+            <div class="metric-card gray">
+              <div class="metric-header">
+                <span>Demand Prediction</span>
+                <span class="metric-tag">Next 1h</span>
+              </div>
+              <div class="metric-value">+15%</div>
+              <div class="metric-footer">Upscale planned at 16:00</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-header">
+                <span>FinOps Burn Rate</span>
+                <span class="metric-tag">Daily</span>
+              </div>
+              <div class="metric-value" id="finopsBurnVal">$342</div>
+              <div class="metric-footer">Within estimated monthly budget</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-header">
+                <span>Autoscaling Nodes</span>
+                <span class="metric-tag">Active</span>
+              </div>
+              <div class="metric-value" id="activeNodesVal">4 / 12</div>
+              <div class="metric-footer">Healthy resource buffers</div>
+            </div>
+
+            <!-- Capacity right-sizing card -->
+            <div class="data-card span-3">
+              <div class="card-header">
+                <h3>Capacity Optimization & Right Sizing Panel</h3>
+              </div>
+              <div class="card-body">
+                <div class="optimization-grid">
+                  <div class="opt-card" id="opt-db-node">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+                      <h4>orcl_db_node1</h4>
+                      <button class="action-btn-sm primary" id="btnApplyDownscale" onclick="applyNodeDownscale()">Apply Right-Sizing</button>
+                    </div>
+                    <p id="opt-db-desc">CPU utilization low (8%). Right-sizing recommendation: Downscale from 32 vCPUs to 16 vCPUs.</p>
+                    <span class="savings" id="opt-db-savings">Potential Savings: <strong>$140/mo</strong></span>
+                  </div>
+                  <div class="opt-card">
+                    <h4>k8s_api_service</h4>
+                    <p>Replica set running near max buffer limits. Autoscaling triggered +2 pods to secure API reliability.</p>
+                    <span class="savings" style="color: var(--color-blue);">State: <strong>Optimized</strong></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- MODULE 6: PREDICTIVE INTELLIGENCE -->
+        <div class="tab-panel" id="tab-predictive-intel">
+          <div class="dashboard-grid">
+            <div class="metric-card red">
+              <div class="metric-header">
+                <span>Trend Correlation Match</span>
+                <span class="metric-tag">Similarity</span>
+              </div>
+              <div class="metric-value" id="trendMatchVal">91.8%</div>
+              <div class="metric-footer">Matches Incident pattern #4211</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-header">
+                <span>Predictive Outage Risk</span>
+                <span class="metric-tag">Next 24h</span>
+              </div>
+              <div class="metric-value" id="outageRiskVal">2.1%</div>
+              <div class="metric-footer">Extremely low risk pattern</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-header">
+                <span>Pattern Detection State</span>
+                <span class="metric-tag">Active</span>
+              </div>
+              <div class="metric-value">LIVE</div>
+              <div class="metric-footer">Analyzing transactions buffer</div>
+            </div>
+
+            <!-- Similarity Correlation and Simulation -->
+            <div class="data-card span-3">
+              <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <h3>Predictive Analytics & Similarity Correlation</h3>
+                <button class="action-btn-sm primary" id="btnRunPredictionSim" onclick="runPredictionSimulation()">Run ML Similarity Audit</button>
+              </div>
+              <div class="card-body">
+                <div class="predictive-flow">
+                  <div class="flow-step">
+                    <span class="step-num">1</span>
+                    <span class="step-label">Identify Trend Patterns</span>
+                    <p class="step-desc">Monitoring sequence matches for transaction traffic spikes.</p>
+                  </div>
+                  <div class="flow-step">
+                    <span class="step-num">2</span>
+                    <span class="step-label">Correlation Matching</span>
+                    <p class="step-desc">Cross-referencing database performance metrics with past incidents.</p>
+                  </div>
+                  <div class="flow-step">
+                    <span class="step-num">3</span>
+                    <span class="step-label">Mitigation Auto-Planning</span>
+                    <p class="step-desc" id="flowStep3Desc">Staging mitigation profiles for system state trends.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+
+      </div>
+    </div>
+
+    <!-- ── RIGHT SIDEBAR: INTELLIGENT AI AVATAR & CONVERSATION PANEL ─ -->
+    <aside class="avatar-sidebar">
+      <div class="avatar-sidebar-header">
+        <h3>AI AGENT INTERACTION</h3>
+        <div class="agent-badge active">ONLINE</div>
+      </div>
+
+      <!-- Avatar Screen Container -->
+      <div class="avatar-screen-wrapper">
+        <div class="avatar-glow-ring" id="avatarGlow"></div>
+        <div class="avatar-screen">
+          <video id="avatarVideo" autoplay playsinline muted style="display: none;"></video>
+          <img id="avatarImage" src="/api/persona" alt="AI Agent Persona" />
+          <div class="screen-pulse-wave" id="speakingWave">
+            <span></span><span></span><span></span><span></span><span></span>
+          </div>
+          <div class="stream-source-badge" id="streamBadge">Local Agent Mode</div>
+        </div>
+      </div>
+
+      <!-- Conversation Logs -->
+      <div class="agent-conversation-area">
+        <div class="messages-container" id="conversationLog">
+          <div class="welcome-chat">
+            <span class="robot-emoji">🤖</span>
+            <p>Welcome, Operator. I am connected to all 6 enterprise operational metrics. Speak or type to begin audit.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Voice Activity Indicator -->
+      <div class="live-transcript-box" id="transcriptArea" style="display: none;">
+        <span class="listening-tag">Listening...</span>
+        <div class="transcript-msg" id="liveTranscript"></div>
+      </div>
+
+      <!-- User Voice & Text Inputs -->
+      <div class="agent-controls-footer">
+        
+        <!-- Voice/Mic Capture -->
+        <div class="mic-controller">
+          <button class="voice-mic-btn" id="micBtn">
+            <div class="ripple-glow" id="micRipple"></div>
+            <svg class="icon-mic" viewBox="0 0 24 24" fill="none">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" fill="currentColor"/>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+              <line x1="12" y1="19" x2="12" y2="23" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+            </svg>
+          </button>
+          <span class="mic-hint-text" id="micLabel">Click to speak</span>
+        </div>
+
+        <!-- Text Message -->
+        <div class="text-message-bar">
+          <input type="text" id="textInput" placeholder="Ask Mr. Brain..." />
+          <button id="sendBtn" class="send-message-btn">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+              <path d="M22 2L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              <path d="M22 2L15 22 11 13 2 9l20-7z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </div>
+
+        <div class="session-management-buttons">
+          <button id="btnStartSession" class="action-btn session-start">▶ Connect Agent</button>
+          <button id="btnStopSession" class="action-btn session-stop" disabled>■ Disconnect</button>
+        </div>
+      </div>
+    </aside>
+
+  </div>
+
+  <!-- Persona Switch Modal -->
+  <div class="modal-overlay" id="personaModal" style="display:none">
+    <div class="modal-card">
+      <div class="modal-title">
+        <h3>Change Agent Persona</h3>
+        <button class="modal-close" id="closePersonaModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <p>Choose an image file representing the agent's face. The agent uses this image on start.</p>
+        <input type="file" id="personaUpload" accept="image/*" style="display:none"/>
+        <button class="action-btn full-width" id="btnUploadPersona">Select Image File</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Audio Analysis Canvas (hidden overlay for math visualization) -->
+  <canvas id="vizCanvas" style="display:none;"></canvas>
+
+  <script src="/static/js/dashboard.js"></script>
+</body>
+</html>
